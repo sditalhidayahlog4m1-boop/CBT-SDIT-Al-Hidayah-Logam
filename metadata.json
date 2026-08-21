@@ -1,0 +1,8 @@
+{
+  "name": "Remix CBT_SDIT Al Hidayah Logam",
+  "description": "Sistem pembuat soal otomatis, manajemen bank soal, guru, siswa, serta pelaksanaan ujian dengan token.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

@@ -1,0 +1,16 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Aturan untuk dokumen data aplikasi CBT SDIT Al Hidayah Logam
+    match /app_data/{docId} {
+      allow read, write: if true;
+    }
+    
+    // Aturan untuk koleksi umum lainnya
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}

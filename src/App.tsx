@@ -1,0 +1,721 @@
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  Teacher,
+  Student,
+  Subject,
+  QuestionBank,
+  ExamResult,
+  GameHistoryLog,
+  UserLoginLog,
+  ActiveTab,
+  AuthUser,
+  RolePermissions,
+} from './types';
+import {
+  getStoredTeachers,
+  saveStoredTeachers,
+  getStoredStudents,
+  saveStoredStudents,
+  getStoredSubjects,
+  saveStoredSubjects,
+  getStoredBanks,
+  saveStoredBanks,
+  getStoredResults,
+  saveStoredResults,
+  getStoredGameLogs,
+  saveStoredGameLogs,
+  getStoredLoginLogs,
+  saveStoredLoginLogs,
+  clearAllStoredData,
+  getStoredCurrentUser,
+  saveStoredCurrentUser,
+  getStoredRolePermissions,
+  saveStoredRolePermissions,
+  SchoolProfile,
+  getStoredSchoolProfile,
+  saveStoredSchoolProfile,
+  getStoredGameData,
+  saveStoredGameData,
+} from './utils/storage';
+
+import { Sidebar } from './components/Sidebar';
+import { Header } from './components/Header';
+import { MobileBottomNav } from './components/MobileBottomNav';
+import { LoginModal } from './components/LoginModal';
+import { DashboardView } from './components/DashboardView';
+import { ProfilSayaView } from './components/ProfilSayaView';
+import { ProfilSekolahView } from './components/ProfilSekolahView';
+import { TeacherDataView } from './components/TeacherDataView';
+import { StudentDataView } from './components/StudentDataView';
+import { SubjectView } from './components/SubjectView';
+import { AiQuestionGeneratorView } from './components/AiQuestionGeneratorView';
+import { AiGameGeneratorView } from './components/AiGameGeneratorView';
+import { EkstrakDokumenView } from './components/EkstrakDokumenView';
+import { UploadSoalView } from './components/UploadSoalView';
+import { BankSoalView } from './components/BankSoalView';
+import { KumpulanJawabanView } from './components/KumpulanJawabanView';
+import { MulaiUjianView } from './components/MulaiUjianView';
+import { ExamScreen } from './components/ExamScreen';
+import { ExamHistoryView } from './components/ExamHistoryView';
+import { GameHistoryView } from './components/GameHistoryView';
+import { HakAksesView } from './components/HakAksesView';
+import { ResetDataView } from './components/ResetDataView';
+
+import {
+  fetchAppDataFromFirestore,
+  saveAppDataToFirestore,
+  resetAllDataInFirestore,
+  subscribeToAppData,
+  trackUserLoginInFirestore,
+  AppData,
+} from './utils/firebaseSync';
+import { isDeepEqual } from './utils/deepEqual';
+
+export default function App() {
+  const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  // Sync Overlay state
+  const [isSyncingServer, setIsSyncingServer] = useState(true);
+
+  // User Authentication State
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(getStoredCurrentUser);
+  const [isLoginModalOpen, setIsLoginModalOpen] = useState<boolean>(() => !getStoredCurrentUser());
+
+  // Role Access Permissions State
+  const [rolePermissions, setRolePermissions] = useState<RolePermissions>(getStoredRolePermissions);
+
+  // School Profile State
+  const [schoolProfile, setSchoolProfile] = useState<SchoolProfile>(getStoredSchoolProfile);
+
+  // Persistent States
+  const [teachers, setTeachers] = useState<Teacher[]>(getStoredTeachers);
+  const [students, setStudents] = useState<Student[]>(getStoredStudents);
+  const [subjects, setSubjects] = useState<Subject[]>(getStoredSubjects);
+  const [banks, setBanks] = useState<QuestionBank[]>(getStoredBanks);
+  const [results, setResults] = useState<ExamResult[]>(getStoredResults);
+  const [gameLogs, setGameLogs] = useState<GameHistoryLog[]>(getStoredGameLogs);
+  const [loginLogs, setLoginLogs] = useState<UserLoginLog[]>(getStoredLoginLogs);
+  const [gameData, setGameData] = useState<Record<string, any>>(getStoredGameData);
+
+  // Active Exam Focus Mode state
+  const [activeExam, setActiveExam] = useState<{
+    studentName: string;
+    classRoom: string;
+    bank: QuestionBank;
+  } | null>(null);
+
+  // Track last synced data from Firestore to prevent echo writes
+  const lastSyncedDataRef = useRef<AppData | null>(null);
+  const hasFinishedInitialSyncRef = useRef(false);
+
+  // State refs for listener closures
+  const teachersRef = useRef(teachers);
+  teachersRef.current = teachers;
+  const studentsRef = useRef(students);
+  studentsRef.current = students;
+  const subjectsRef = useRef(subjects);
+  subjectsRef.current = subjects;
+  const banksRef = useRef(banks);
+  banksRef.current = banks;
+  const resultsRef = useRef(results);
+  resultsRef.current = results;
+  const gameLogsRef = useRef(gameLogs);
+  gameLogsRef.current = gameLogs;
+  const loginLogsRef = useRef(loginLogs);
+  loginLogsRef.current = loginLogs;
+  const schoolProfileRef = useRef(schoolProfile);
+  schoolProfileRef.current = schoolProfile;
+  const rolePermissionsRef = useRef(rolePermissions);
+  rolePermissionsRef.current = rolePermissions;
+  const gameDataRef = useRef(gameData);
+  gameDataRef.current = gameData;
+
+  const applyRemoteData = (data: AppData, isLocalWrite: boolean = false) => {
+    if (isLocalWrite) return;
+
+    if (!lastSyncedDataRef.current) {
+      lastSyncedDataRef.current = { ...data };
+    }
+
+    if (Array.isArray(data.teachers) && !isDeepEqual(teachersRef.current, data.teachers)) {
+      setTeachers(data.teachers);
+      saveStoredTeachers(data.teachers);
+      lastSyncedDataRef.current.teachers = data.teachers;
+    }
+    if (Array.isArray(data.students) && !isDeepEqual(studentsRef.current, data.students)) {
+      setStudents(data.students);
+      saveStoredStudents(data.students);
+      lastSyncedDataRef.current.students = data.students;
+    }
+    if (Array.isArray(data.subjects) && !isDeepEqual(subjectsRef.current, data.subjects)) {
+      setSubjects(data.subjects);
+      saveStoredSubjects(data.subjects);
+      lastSyncedDataRef.current.subjects = data.subjects;
+    }
+    if (Array.isArray(data.banks) && !isDeepEqual(banksRef.current, data.banks)) {
+      setBanks(data.banks);
+      saveStoredBanks(data.banks);
+      lastSyncedDataRef.current.banks = data.banks;
+    }
+    if (Array.isArray(data.results) && !isDeepEqual(resultsRef.current, data.results)) {
+      setResults(data.results);
+      saveStoredResults(data.results);
+      lastSyncedDataRef.current.results = data.results;
+    }
+    if (Array.isArray(data.gameLogs) && !isDeepEqual(gameLogsRef.current, data.gameLogs)) {
+      setGameLogs(data.gameLogs);
+      saveStoredGameLogs(data.gameLogs);
+      lastSyncedDataRef.current.gameLogs = data.gameLogs;
+    }
+    if (Array.isArray(data.loginLogs) && !isDeepEqual(loginLogsRef.current, data.loginLogs)) {
+      setLoginLogs(data.loginLogs);
+      saveStoredLoginLogs(data.loginLogs);
+      lastSyncedDataRef.current.loginLogs = data.loginLogs;
+    }
+    if (data.schoolProfile && !isDeepEqual(schoolProfileRef.current, data.schoolProfile)) {
+      setSchoolProfile(data.schoolProfile);
+      saveStoredSchoolProfile(data.schoolProfile);
+      lastSyncedDataRef.current.schoolProfile = data.schoolProfile;
+    }
+    if (data.rolePermissions && !isDeepEqual(rolePermissionsRef.current, data.rolePermissions)) {
+      setRolePermissions(data.rolePermissions);
+      saveStoredRolePermissions(data.rolePermissions);
+      lastSyncedDataRef.current.rolePermissions = data.rolePermissions;
+    }
+    if (data.gameData && !isDeepEqual(gameDataRef.current, data.gameData)) {
+      setGameData(data.gameData);
+      saveStoredGameData(data.gameData);
+      lastSyncedDataRef.current.gameData = data.gameData;
+    }
+  };
+
+  // Initial Firestore Sync and Realtime Subscription
+  useEffect(() => {
+    let unsubscribe: (() => void) | null = null;
+
+    const performSync = async () => {
+      try {
+        const remoteData = await fetchAppDataFromFirestore();
+        if (remoteData) {
+          applyRemoteData(remoteData, false);
+        } else {
+          // If Firestore is empty, seed it with current local baseline
+          await saveAppDataToFirestore({
+            teachers: teachersRef.current,
+            students: studentsRef.current,
+            subjects: subjectsRef.current,
+            banks: banksRef.current,
+            results: resultsRef.current,
+            gameLogs: gameLogsRef.current,
+            loginLogs: loginLogsRef.current,
+            schoolProfile: schoolProfileRef.current,
+            rolePermissions: rolePermissionsRef.current,
+            gameData: gameDataRef.current,
+          });
+        }
+      } catch (err) {
+        console.warn('[Firestore] Initial sync failed:', err);
+      } finally {
+        setIsSyncingServer(false);
+        hasFinishedInitialSyncRef.current = true;
+
+        unsubscribe = subscribeToAppData((data, isLocalWrite) => {
+          applyRemoteData(data, isLocalWrite);
+        });
+      }
+    };
+
+    performSync();
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
+  }, []);
+
+  // Synchronize Favicon and Document Title with School Profile & Custom Logo
+  useEffect(() => {
+    let name = schoolProfile?.name?.trim() || 'SDIT Al Hidayah Logam';
+    if (name === 'SDIT AL HIDAYAH' || name === 'SDIT Al Hidayah' || name === 'SDIT AL HIDAYAH LOGAM') {
+      name = 'SDIT Al Hidayah Logam';
+    }
+
+    if (name.startsWith('CBT_')) {
+      document.title = name;
+    } else {
+      document.title = `CBT_${name}`;
+    }
+
+    if (schoolProfile?.logoUrl) {
+      let link: HTMLLinkElement | null = document.querySelector("link[rel*='icon']");
+      if (!link) {
+        link = document.createElement('link');
+        link.rel = 'icon';
+        document.head.appendChild(link);
+      }
+      link.type = 'image/png';
+      link.href = schoolProfile.logoUrl;
+    }
+  }, [schoolProfile]);
+
+  const handleLogin = (user: AuthUser) => {
+    setCurrentUser(user);
+    saveStoredCurrentUser(user);
+    setIsMobileMenuOpen(false);
+
+    // Record login event in loginLogs
+    const now = new Date();
+    const formattedTime = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+    
+    let identifier = user.username || '';
+    let classRoom: string | undefined = undefined;
+    let positionOrSubject: string | undefined = undefined;
+
+    if (user.role === 'siswa' && user.details && 'nisn' in user.details) {
+      identifier = user.details.nisn || user.details.nis || user.username || '';
+      classRoom = user.details.classRoom;
+    } else if (user.role === 'guru' && user.details && 'nip' in user.details) {
+      identifier = user.details.nip || user.details.nuptk || user.username || '';
+      positionOrSubject = `${user.details.position || 'Guru'}${user.details.subject ? ` (${user.details.subject})` : ''}`;
+    }
+
+    const newLog: UserLoginLog = {
+      id: `login-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      userId: user.details?.id || user.username || user.name,
+      name: user.name,
+      role: user.role,
+      identifier: identifier || user.username || '-',
+      classRoom,
+      positionOrSubject,
+      loginTime: formattedTime,
+      lastSeenTime: formattedTime,
+      photoUrl: user.photoUrl,
+    };
+
+    setLoginLogs((prev) => {
+      const filtered = prev.filter(
+        (l) => !(l.name.toLowerCase() === user.name.toLowerCase() && l.role === user.role)
+      );
+      const updated = [newLog, ...filtered];
+      saveStoredLoginLogs(updated);
+      return updated;
+    });
+
+    trackUserLoginInFirestore(newLog);
+
+    if (user.role === 'siswa' || user.role === 'umum') {
+      setActiveTab('profil-saya');
+    }
+  };
+
+  const handleLogout = () => {
+    setCurrentUser(null);
+    saveStoredCurrentUser(null);
+  };
+
+  // Sync state changes with localStorage & Firestore
+  useEffect(() => {
+    saveStoredTeachers(teachers);
+    if (hasFinishedInitialSyncRef.current) {
+      saveAppDataToFirestore({ teachers });
+    }
+  }, [teachers]);
+
+  useEffect(() => {
+    saveStoredStudents(students);
+    if (hasFinishedInitialSyncRef.current) {
+      saveAppDataToFirestore({ students });
+    }
+  }, [students]);
+
+  useEffect(() => {
+    saveStoredSubjects(subjects);
+    if (hasFinishedInitialSyncRef.current) {
+      saveAppDataToFirestore({ subjects });
+    }
+  }, [subjects]);
+
+  useEffect(() => {
+    saveStoredBanks(banks);
+    if (hasFinishedInitialSyncRef.current) {
+      saveAppDataToFirestore({ banks });
+    }
+  }, [banks]);
+
+  useEffect(() => {
+    saveStoredResults(results);
+    if (hasFinishedInitialSyncRef.current) {
+      saveAppDataToFirestore({ results });
+    }
+  }, [results]);
+
+  useEffect(() => {
+    saveStoredGameLogs(gameLogs);
+    if (hasFinishedInitialSyncRef.current) {
+      saveAppDataToFirestore({ gameLogs });
+    }
+  }, [gameLogs]);
+
+  useEffect(() => {
+    saveStoredLoginLogs(loginLogs);
+  }, [loginLogs]);
+
+  useEffect(() => {
+    saveStoredRolePermissions(rolePermissions);
+    if (hasFinishedInitialSyncRef.current) {
+      saveAppDataToFirestore({ rolePermissions });
+    }
+  }, [rolePermissions]);
+
+  useEffect(() => {
+    saveStoredGameData(gameData);
+    if (hasFinishedInitialSyncRef.current) {
+      saveAppDataToFirestore({ gameData });
+    }
+  }, [gameData]);
+
+  useEffect(() => {
+    saveStoredSchoolProfile(schoolProfile);
+    if (hasFinishedInitialSyncRef.current) {
+      saveAppDataToFirestore({ schoolProfile });
+    }
+  }, [schoolProfile]);
+
+  const handleSaveGameLog = (newLog: GameHistoryLog) => {
+    setGameLogs((prev) => {
+      const exists = prev.some((l) => l.id === newLog.id);
+      if (exists) return prev;
+      const updated = [newLog, ...prev];
+      saveStoredGameLogs(updated);
+      saveAppDataToFirestore({ gameLogs: updated });
+      return updated;
+    });
+  };
+
+  const handleClearGameLogs = () => {
+    setGameLogs([]);
+    saveStoredGameLogs([]);
+    saveAppDataToFirestore({ gameLogs: [] });
+  };
+
+  const handleDeleteGameLog = (id: string) => {
+    setGameLogs((prev) => {
+      const updated = prev.filter((item) => item.id !== id);
+      saveStoredGameLogs(updated);
+      saveAppDataToFirestore({ gameLogs: updated });
+      return updated;
+    });
+  };
+
+  const handleRefreshGameLogs = async (): Promise<boolean> => {
+    const data = await fetchAppDataFromFirestore(true);
+    if (data && Array.isArray(data.gameLogs)) {
+      setGameLogs(data.gameLogs);
+      saveStoredGameLogs(data.gameLogs);
+      return true;
+    }
+    const stored = getStoredGameLogs();
+    setGameLogs(stored);
+    return true;
+  };
+
+  const handleUpdateGameData = (newGameData: Record<string, any>) => {
+    setGameData(newGameData);
+    saveStoredGameData(newGameData);
+    saveAppDataToFirestore({ gameData: newGameData });
+  };
+
+  // Auto-open login modal if user is not logged in, or redirect guest if trying to view protected tab
+  useEffect(() => {
+    if (!currentUser) {
+      setIsLoginModalOpen(true);
+      if (activeTab !== 'dashboard' && activeTab !== 'profil-sekolah') {
+        setActiveTab('dashboard');
+      }
+    } else if (currentUser.role === 'siswa' || currentUser.role === 'umum') {
+      const allowed = currentUser.role === 'siswa'
+        ? (rolePermissions?.siswa || ['profil-saya', 'ai-pembuat-game', 'bank-soal', 'mulai-ujian', 'riwayat-ujian'])
+        : (rolePermissions?.umum || ['profil-saya', 'ai-pembuat-game', 'bank-soal']);
+
+      if (!allowed.includes(activeTab)) {
+        if (allowed.includes('profil-saya')) {
+          setActiveTab('profil-saya');
+        } else if (allowed.length > 0) {
+          setActiveTab(allowed[0]);
+        } else {
+          setActiveTab('dashboard');
+        }
+      }
+    }
+  }, [currentUser, activeTab, rolePermissions]);
+
+  // Handler when AI Generator or Upload saves new Question Bank
+  const handleSaveBank = (newBank: QuestionBank) => {
+    setBanks((prev) => {
+      const filtered = prev.filter((b) => b.id !== newBank.id);
+      const updated = [newBank, ...filtered];
+      saveStoredBanks(updated);
+      saveAppDataToFirestore({ banks: updated });
+      return updated;
+    });
+  };
+
+  // Handler when student logs in to start exam
+  const handleStartExam = (studentName: string, classRoom: string, bank: QuestionBank) => {
+    setActiveExam({ studentName, classRoom, bank });
+  };
+
+  // Handler when exam is completed
+  const handleFinishExam = (result: ExamResult) => {
+    setResults((prev) => {
+      const updated = [result, ...prev];
+      saveStoredResults(updated);
+      saveAppDataToFirestore({ results: updated });
+      return updated;
+    });
+  };
+
+  const handleExitExam = () => {
+    setActiveExam(null);
+    setActiveTab('riwayat-ujian');
+  };
+
+  const handleUpdateSchoolProfile = (updated: SchoolProfile) => {
+    saveStoredSchoolProfile(updated);
+    setSchoolProfile(updated);
+    saveAppDataToFirestore({ schoolProfile: updated });
+  };
+
+  const handleResetAllData = async () => {
+    clearAllStoredData();
+    setTeachers([]);
+    setStudents([]);
+    setSubjects([]);
+    setBanks([]);
+    setResults([]);
+    setGameLogs([]);
+    setLoginLogs([]);
+    setGameData({});
+    await resetAllDataInFirestore();
+  };
+
+  // If in Focus Exam Mode, render ONLY ExamScreen (No Sidebar, No Header)
+  if (activeExam) {
+    return (
+      <ExamScreen
+        studentName={activeExam.studentName}
+        classRoom={activeExam.classRoom}
+        bank={activeExam.bank}
+        onFinishExam={handleFinishExam}
+        onExitExam={handleExitExam}
+      />
+    );
+  }
+
+  return (
+    <div className="flex h-screen bg-[#020617] font-sans text-slate-100 antialiased overflow-hidden">
+      {/* Sidebar / Mobile Drawer */}
+      <Sidebar
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        collapsed={sidebarCollapsed}
+        setCollapsed={setSidebarCollapsed}
+        isMobileMenuOpen={isMobileMenuOpen}
+        setIsMobileMenuOpen={setIsMobileMenuOpen}
+        currentUser={currentUser}
+        onOpenLoginModal={() => setIsLoginModalOpen(true)}
+        rolePermissions={rolePermissions}
+        schoolProfile={schoolProfile}
+      />
+
+      {/* Main Layout */}
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
+        {/* Header */}
+        <Header
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          isMobileMenuOpen={isMobileMenuOpen}
+          setIsMobileMenuOpen={setIsMobileMenuOpen}
+          currentUser={currentUser}
+          onOpenLoginModal={() => setIsLoginModalOpen(true)}
+          schoolProfile={schoolProfile}
+        />
+
+        {/* Content Area with Mobile Bottom Nav Padding */}
+        <main className="flex-1 overflow-y-auto custom-scrollbar pb-20 md:pb-6">
+          {activeTab === 'dashboard' && (
+            <DashboardView
+              teachers={teachers}
+              students={students}
+              subjects={subjects}
+              banks={banks}
+              results={results}
+              gameLogs={gameLogs}
+              loginLogs={loginLogs}
+              setActiveTab={setActiveTab}
+              currentUser={currentUser}
+              onOpenLoginModal={() => setIsLoginModalOpen(true)}
+            />
+          )}
+
+          {activeTab === 'profil-saya' && (
+            <ProfilSayaView
+              currentUser={currentUser}
+              setCurrentUser={setCurrentUser}
+              teachers={teachers}
+              setTeachers={setTeachers}
+              students={students}
+              setStudents={setStudents}
+              onOpenLoginModal={() => setIsLoginModalOpen(true)}
+            />
+          )}
+
+          {activeTab === 'profil-sekolah' && (
+            <ProfilSekolahView
+              currentUser={currentUser}
+              teachers={teachers}
+              students={students}
+              subjects={subjects}
+              schoolProfile={schoolProfile}
+              onUpdateSchoolProfile={handleUpdateSchoolProfile}
+            />
+          )}
+
+          {activeTab === 'data-guru' && (
+            <TeacherDataView teachers={teachers} setTeachers={setTeachers} />
+          )}
+
+          {activeTab === 'data-siswa' && (
+            <StudentDataView students={students} setStudents={setStudents} />
+          )}
+
+          {activeTab === 'mata-pelajaran' && (
+            <SubjectView subjects={subjects} setSubjects={setSubjects} />
+          )}
+
+          {activeTab === 'pembuat-soal-ai' && (
+            <AiQuestionGeneratorView
+              onSaveBank={handleSaveBank}
+              setActiveTab={setActiveTab}
+              currentUser={currentUser}
+              teachers={teachers}
+              subjects={subjects}
+              students={students}
+              banks={banks}
+            />
+          )}
+
+          {activeTab === 'ai-pembuat-game' && (
+            <AiGameGeneratorView
+              currentUser={currentUser}
+              subjects={subjects}
+              banks={banks}
+              setBanks={setBanks}
+              onSaveGameLog={handleSaveGameLog}
+              gameData={gameData}
+              onUpdateGameData={handleUpdateGameData}
+            />
+          )}
+
+          {activeTab === 'riwayat-game' && (
+            <GameHistoryView
+              gameLogs={gameLogs}
+              setGameLogs={setGameLogs}
+              currentUser={currentUser}
+              onClearLogs={handleClearGameLogs}
+              onDeleteLog={handleDeleteGameLog}
+              onRefresh={handleRefreshGameLogs}
+            />
+          )}
+
+          {activeTab === 'ekstrak-dokumen' && (
+            <EkstrakDokumenView
+              onSaveBank={handleSaveBank}
+              setActiveTab={setActiveTab}
+              teachers={teachers}
+              subjects={subjects}
+              students={students}
+              banks={banks}
+            />
+          )}
+
+          {activeTab === 'upload-soal' && (
+            <UploadSoalView
+              onSaveBank={handleSaveBank}
+              setActiveTab={setActiveTab}
+              teachers={teachers}
+              subjects={subjects}
+              students={students}
+              banks={banks}
+            />
+          )}
+
+          {activeTab === 'bank-soal' && (
+            <BankSoalView banks={banks} setBanks={setBanks} setActiveTab={setActiveTab} />
+          )}
+
+          {activeTab === 'kumpulan-jawaban' && <KumpulanJawabanView banks={banks} />}
+
+          {activeTab === 'mulai-ujian' && (
+            <MulaiUjianView
+              banks={banks}
+              students={students}
+              subjects={subjects}
+              currentUser={currentUser}
+              onStartExam={handleStartExam}
+            />
+          )}
+
+          {activeTab === 'riwayat-ujian' && (
+            <ExamHistoryView results={results} setResults={setResults} banks={banks} />
+          )}
+
+          {activeTab === 'hak-akses' && (
+            <HakAksesView
+              rolePermissions={rolePermissions}
+              setRolePermissions={setRolePermissions}
+              currentUser={currentUser}
+              onOpenLoginModal={() => setIsLoginModalOpen(true)}
+            />
+          )}
+
+          {activeTab === 'reset-data' && (
+            <ResetDataView
+              teachers={teachers}
+              students={students}
+              subjects={subjects}
+              banks={banks}
+              results={results}
+              onResetAllData={handleResetAllData}
+              setActiveTab={setActiveTab}
+            />
+          )}
+        </main>
+
+        {/* Modal Login System */}
+        <LoginModal
+          isOpen={isLoginModalOpen}
+          onClose={() => setIsLoginModalOpen(false)}
+          teachers={teachers}
+          students={students}
+          currentUser={currentUser}
+          onLogin={handleLogin}
+          onLogout={handleLogout}
+          schoolProfile={schoolProfile}
+        />
+
+        {/* Mobile Bottom Navigation Bar */}
+        <MobileBottomNav
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          onToggleMobileMenu={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+          isMobileMenuOpen={isMobileMenuOpen}
+          currentUser={currentUser}
+          rolePermissions={rolePermissions}
+          onOpenLoginModal={() => setIsLoginModalOpen(true)}
+        />
+      </div>
+    </div>
+  );
+}

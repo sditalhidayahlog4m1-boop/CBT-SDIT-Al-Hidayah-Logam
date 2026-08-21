@@ -1,0 +1,13 @@
+@import "tailwindcss";
+
+@layer utilities {
+  .font-arabic, .font-uthmanic {
+    font-family: 'KFGQPC Uthmanic Script Hafs', 'Amiri Quran', 'Amiri', 'Scheherazade New', 'Noto Naskh Arabic', 'Traditional Arabic', 'Arabic Typesetting', serif !important;
+  }
+}
+
+.arabic-text {
+  font-family: 'KFGQPC Uthmanic Script Hafs', 'Amiri Quran', 'Amiri', 'Scheherazade New', 'Noto Naskh Arabic', 'Traditional Arabic', 'Arabic Typesetting', serif !important;
+  direction: rtl;
+  line-height: 2;
+}

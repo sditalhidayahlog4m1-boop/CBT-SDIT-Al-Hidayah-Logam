@@ -1,0 +1,62 @@
+{
+  "entities": {
+    "app_data": {
+      "title": "AppData",
+      "description": "Dokumen tunggal penyimpan data aplikasi sekolah, bank soal, guru, siswa, hasil ujian, riwayat game, profil sekolah, hak akses, dan log login.",
+      "type": "object",
+      "properties": {
+        "teachers": {
+          "type": "array",
+          "description": "Daftar data guru"
+        },
+        "students": {
+          "type": "array",
+          "description": "Daftar data siswa"
+        },
+        "subjects": {
+          "type": "array",
+          "description": "Daftar mata pelajaran"
+        },
+        "banks": {
+          "type": "array",
+          "description": "Daftar bank soal"
+        },
+        "results": {
+          "type": "array",
+          "description": "Daftar hasil ujian siswa"
+        },
+        "gameLogs": {
+          "type": "array",
+          "description": "Riwayat permainan game edukasi"
+        },
+        "loginLogs": {
+          "type": "array",
+          "description": "Riwayat login pengguna"
+        },
+        "schoolProfile": {
+          "type": "object",
+          "description": "Data profil sekolah dan identitas"
+        },
+        "rolePermissions": {
+          "type": "object",
+          "description": "Konfigurasi hak akses menu berdasarkan role"
+        },
+        "gameData": {
+          "type": "object",
+          "description": "Data simpanan game edukasi interaktif"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Timestamp ISO pembaruan terakhir"
+        }
+      },
+      "required": ["updatedAt"]
+    }
+  },
+  "firestore": {
+    "app_data/{docId}": {
+      "entity": "app_data",
+      "description": "Dokumen app_data/main untuk sinkronisasi cloud real-time antar perangkat"
+    }
+  }
+}

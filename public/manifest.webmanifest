@@ -1,0 +1,9 @@
+{
+  "name": "CBT_SDIT Al Hidayah Logam",
+  "short_name": "SDIT Al Hidayah",
+  "description": "Sistem CBT (Computer-Based Test) modern berbasis web dengan dukungan online/offline.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#020617",
+  "theme_color": "#0f172a"
+}
