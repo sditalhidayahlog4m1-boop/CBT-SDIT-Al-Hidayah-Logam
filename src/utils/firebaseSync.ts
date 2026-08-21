@@ -53,18 +53,9 @@ export function getFirestoreDb(): Firestore | null {
     const dbId = config.firestoreDatabaseId;
 
     try {
-      if (dbId && dbId !== '(default)') {
-        firestoreDb = initializeFirestore(app, {
-          experimentalAutoDetectLongPolling: true,
-        }, dbId);
-      } else {
-        firestoreDb = initializeFirestore(app, {
-          experimentalAutoDetectLongPolling: true,
-        });
-      }
-    } catch {
-      // If initializeFirestore already ran or throws, fallback to getFirestore
       firestoreDb = dbId && dbId !== '(default)' ? getFirestore(app, dbId) : getFirestore(app);
+    } catch {
+      firestoreDb = getFirestore(app);
     }
 
     return firestoreDb;

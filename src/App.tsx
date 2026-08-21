@@ -73,6 +73,7 @@ import {
   syncGameLogToFirestore,
   AppData,
 } from './utils/firebaseSync';
+import { subscribeToLocalSync, broadcastAppDataChange } from './utils/syncEngine';
 import { isDeepEqual } from './utils/deepEqual';
 
 export default function App() {
@@ -243,7 +244,7 @@ export default function App() {
       saveStoredGameData(data.gameData);
       lastSyncedDataRef.current.gameData = data.gameData;
     }
-    if (data.adminAccount && !isDeepEqual(getStoredAdminAccount(), data.adminAccount)) {
+    if (data.adminAccount) {
       saveStoredAdminAccount(data.adminAccount);
       lastSyncedDataRef.current.adminAccount = data.adminAccount;
 
@@ -265,10 +266,17 @@ export default function App() {
     }
   };
 
-  // Initial Firestore Sync and Realtime Subscription for ALL roles
+  // Initial Firestore Sync, Realtime Firestore Subscription, and Local Tab Broadcast Listener
   useEffect(() => {
-    let unsubscribe: (() => void) | null = null;
+    let unsubscribeFirestore: (() => void) | null = null;
+    let unsubscribeLocal: (() => void) | null = null;
 
+    // 1. Subscribe to instant local multi-tab sync
+    unsubscribeLocal = subscribeToLocalSync((localData) => {
+      applyRemoteData(localData as AppData, false);
+    });
+
+    // 2. Fetch and subscribe to Firebase Cloud Firestore
     const performSync = async () => {
       try {
         const remoteData = await fetchAppDataFromFirestore(true);
@@ -295,7 +303,7 @@ export default function App() {
       } finally {
         hasFinishedInitialSyncRef.current = true;
 
-        unsubscribe = subscribeToAppData((data, isLocalWrite) => {
+        unsubscribeFirestore = subscribeToAppData((data, isLocalWrite) => {
           applyRemoteData(data, isLocalWrite);
         });
       }
@@ -304,7 +312,8 @@ export default function App() {
     performSync();
 
     return () => {
-      if (unsubscribe) unsubscribe();
+      if (unsubscribeFirestore) unsubscribeFirestore();
+      if (unsubscribeLocal) unsubscribeLocal();
     };
   }, []);
 
@@ -388,32 +397,32 @@ export default function App() {
     saveStoredCurrentUser(null);
   };
 
-  // Sync state changes with localStorage & Firestore
+  // Sync state changes with localStorage, BroadcastChannel & Firestore
   useEffect(() => {
     saveStoredTeachers(teachers);
     if (hasFinishedInitialSyncRef.current) {
-      saveAppDataToFirestore({ teachers });
+      broadcastAppDataChange({ teachers });
     }
   }, [teachers]);
 
   useEffect(() => {
     saveStoredStudents(students);
     if (hasFinishedInitialSyncRef.current) {
-      saveAppDataToFirestore({ students });
+      broadcastAppDataChange({ students });
     }
   }, [students]);
 
   useEffect(() => {
     saveStoredSubjects(subjects);
     if (hasFinishedInitialSyncRef.current) {
-      saveAppDataToFirestore({ subjects });
+      broadcastAppDataChange({ subjects });
     }
   }, [subjects]);
 
   useEffect(() => {
     saveStoredBanks(banks);
     if (hasFinishedInitialSyncRef.current) {
-      saveAppDataToFirestore({ banks });
+      broadcastAppDataChange({ banks });
     }
   }, [banks]);
 
@@ -432,21 +441,21 @@ export default function App() {
   useEffect(() => {
     saveStoredRolePermissions(rolePermissions);
     if (hasFinishedInitialSyncRef.current) {
-      saveAppDataToFirestore({ rolePermissions });
+      broadcastAppDataChange({ rolePermissions });
     }
   }, [rolePermissions]);
 
   useEffect(() => {
     saveStoredGameData(gameData);
     if (hasFinishedInitialSyncRef.current) {
-      saveAppDataToFirestore({ gameData });
+      broadcastAppDataChange({ gameData });
     }
   }, [gameData]);
 
   useEffect(() => {
     saveStoredSchoolProfile(schoolProfile);
     if (hasFinishedInitialSyncRef.current) {
-      saveAppDataToFirestore({ schoolProfile });
+      broadcastAppDataChange({ schoolProfile });
     }
   }, [schoolProfile]);
 
