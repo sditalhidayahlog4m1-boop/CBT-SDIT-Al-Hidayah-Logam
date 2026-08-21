@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   User,
   UserCheck,
@@ -10,7 +10,6 @@ import {
   EyeOff,
   Camera,
   Trash2,
-  Save,
   CheckCircle2,
   AlertCircle,
   LogIn,
@@ -25,6 +24,7 @@ import {
   BadgeInfo,
   Building,
   HeartHandshake,
+  RefreshCw,
 } from 'lucide-react';
 import { AuthUser, Teacher, Student } from '../types';
 import {
@@ -69,15 +69,13 @@ export const ProfilSayaView: React.FC<ProfilSayaViewProps> = ({
   const [photoUrl, setPhotoUrl] = useState('');
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [isSaving, setIsSaving] = useState(false);
+  const [autoSaveStatus, setAutoSaveStatus] = useState<'idle' | 'saving' | 'saved'>('saved');
 
   // Admin Credentials
   const [adminName, setAdminName] = useState('');
   const [adminUsername, setAdminUsername] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
-  const [adminConfirmPassword, setAdminConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   // Teacher specific states (Guru)
   const [teacherName, setTeacherName] = useState('');
@@ -118,6 +116,8 @@ export const ProfilSayaView: React.FC<ProfilSayaViewProps> = ({
   const [generalName, setGeneralName] = useState('');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const isInitialLoadRef = useRef(true);
+  const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Sync data with current logged in user and corresponding dataset (teachers / students)
   useEffect(() => {
@@ -130,7 +130,6 @@ export const ProfilSayaView: React.FC<ProfilSayaViewProps> = ({
       setAdminName(currentUser.name || storedAdmin.name || 'Administrator System');
       setAdminUsername(currentUser.username || storedAdmin.username || 'admin');
       setAdminPassword(currentUser.password || storedAdmin.password || 'admin');
-      setAdminConfirmPassword('');
     } else if (currentUser.role === 'guru') {
       // Find teacher in live teachers array
       const matchedTeacher =
@@ -200,7 +199,287 @@ export const ProfilSayaView: React.FC<ProfilSayaViewProps> = ({
     } else {
       setGeneralName(currentUser.name || 'Pengunjung Umum');
     }
-  }, [currentUser, teachers, students]);
+
+    // Delay setting isInitialLoadRef to false to avoid initial spurious auto-save trigger
+    const initialTimer = setTimeout(() => {
+      isInitialLoadRef.current = false;
+    }, 400);
+
+    return () => clearTimeout(initialTimer);
+  }, [currentUser?.id, currentUser?.role]);
+
+  // AUTO-SAVE ENGINE FOR ADMINISTRATOR
+  useEffect(() => {
+    if (!currentUser || currentUser.role !== 'admin' || isInitialLoadRef.current) return;
+
+    setAutoSaveStatus('saving');
+
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+
+    autoSaveTimerRef.current = setTimeout(() => {
+      const finalName = adminName.trim() || 'Administrator System';
+      const finalUsername = adminUsername.trim() || 'admin';
+      const finalPassword = adminPassword.trim() || 'admin';
+      const finalPhoto = photoUrl.trim();
+
+      const updatedAdminObj = {
+        username: finalUsername,
+        password: finalPassword,
+        name: finalName,
+        photoUrl: finalPhoto,
+      };
+
+      saveStoredAdminAccount(updatedAdminObj);
+      broadcastAppDataChange({ adminAccount: updatedAdminObj });
+
+      const updatedAdminUser: AuthUser = {
+        ...currentUser,
+        name: finalName,
+        username: finalUsername,
+        password: finalPassword,
+        photoUrl: finalPhoto,
+      };
+
+      setCurrentUser(updatedAdminUser);
+      saveStoredCurrentUser(updatedAdminUser);
+
+      setAutoSaveStatus('saved');
+    }, 400);
+
+    return () => {
+      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    };
+  }, [adminName, adminUsername, adminPassword, currentUser?.role]);
+
+  // AUTO-SAVE ENGINE FOR GURU
+  useEffect(() => {
+    if (!currentUser || currentUser.role !== 'guru' || isInitialLoadRef.current) return;
+    if (!teacherName.trim()) return;
+
+    setAutoSaveStatus('saving');
+
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+
+    autoSaveTimerRef.current = setTimeout(() => {
+      let updatedTeacherObj: Teacher | null = null;
+      const updatedTeachersList = teachers.map((t) => {
+        const isMatch =
+          (currentUser.details && 'id' in currentUser.details && t.id === currentUser.details.id) ||
+          t.name.trim().toLowerCase() === currentUser.name.trim().toLowerCase() ||
+          (t.username && t.username.trim().toLowerCase() === (currentUser.username || '').trim().toLowerCase());
+
+        if (isMatch) {
+          const updated: Teacher = {
+            ...t,
+            name: teacherName.trim(),
+            gender: teacherGender,
+            birthPlace: teacherBirthPlace.trim(),
+            birthDate: teacherBirthDate.trim(),
+            position: teacherPosition.trim(),
+            subject: teacherSubject.trim(),
+            nik: teacherNik.trim(),
+            nuptk: teacherNuptk.trim(),
+            nip: teacherNip.trim(),
+            address: teacherAddress.trim(),
+            phone: teacherPhone.trim(),
+            email: teacherEmail.trim(),
+            activeStatus: teacherActiveStatus,
+            photoUrl: photoUrl.trim(),
+          };
+          updatedTeacherObj = updated;
+          return updated;
+        }
+        return t;
+      });
+
+      if (!updatedTeacherObj) {
+        const newTeacher: Teacher = {
+          id: (currentUser.details as Teacher)?.id || `guru-${Date.now()}`,
+          name: teacherName.trim(),
+          gender: teacherGender,
+          birthPlace: teacherBirthPlace.trim(),
+          birthDate: teacherBirthDate.trim(),
+          position: teacherPosition.trim(),
+          subject: teacherSubject.trim(),
+          nik: teacherNik.trim(),
+          nuptk: teacherNuptk.trim(),
+          nip: teacherNip.trim(),
+          address: teacherAddress.trim(),
+          phone: teacherPhone.trim(),
+          email: teacherEmail.trim(),
+          activeStatus: teacherActiveStatus,
+          photoUrl: photoUrl.trim(),
+          username: currentUser.username || teacherName.toLowerCase().replace(/\s+/g, ''),
+          password: currentUser.password || teacherBirthDate.trim(),
+        };
+        updatedTeacherObj = newTeacher;
+        updatedTeachersList.push(newTeacher);
+      }
+
+      setTeachers(updatedTeachersList);
+      saveStoredTeachers(updatedTeachersList);
+      broadcastAppDataChange({ teachers: updatedTeachersList });
+
+      const updatedAuthUser: AuthUser = {
+        ...currentUser,
+        name: teacherName.trim(),
+        photoUrl: photoUrl.trim(),
+        details: updatedTeacherObj,
+      };
+      setCurrentUser(updatedAuthUser);
+      saveStoredCurrentUser(updatedAuthUser);
+
+      setAutoSaveStatus('saved');
+    }, 400);
+
+    return () => {
+      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    };
+  }, [
+    teacherName,
+    teacherGender,
+    teacherBirthPlace,
+    teacherBirthDate,
+    teacherPosition,
+    teacherSubject,
+    teacherNik,
+    teacherNuptk,
+    teacherNip,
+    teacherAddress,
+    teacherPhone,
+    teacherEmail,
+    teacherActiveStatus,
+    currentUser?.role,
+  ]);
+
+  // AUTO-SAVE ENGINE FOR SISWA
+  useEffect(() => {
+    if (!currentUser || currentUser.role !== 'siswa' || isInitialLoadRef.current) return;
+    if (!studentName.trim()) return;
+
+    setAutoSaveStatus('saving');
+
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+
+    autoSaveTimerRef.current = setTimeout(() => {
+      let updatedStudentObj: Student | null = null;
+      const updatedStudentsList = students.map((s) => {
+        const isMatch =
+          (currentUser.details && 'id' in currentUser.details && s.id === currentUser.details.id) ||
+          s.name.trim().toLowerCase() === currentUser.name.trim().toLowerCase() ||
+          (s.username && s.username.trim().toLowerCase() === (currentUser.username || '').trim().toLowerCase()) ||
+          (s.nis && s.nis.trim() === (currentUser.username || '').trim());
+
+        if (isMatch) {
+          const updated: Student = {
+            ...s,
+            name: studentName.trim(),
+            nis: studentNis.trim(),
+            nisn: studentNisn.trim(),
+            classRoom: studentClassRoom.trim(),
+            academicYear: studentAcademicYear.trim(),
+            gender: studentGender,
+            birthPlace: studentBirthPlace.trim(),
+            birthDate: studentBirthDate.trim(),
+            fatherName: studentFatherName.trim(),
+            motherName: studentMotherName.trim(),
+            fatherPhone: studentFatherPhone.trim(),
+            motherPhone: studentMotherPhone.trim(),
+            address: studentAddress.trim(),
+            activeStatus: studentActiveStatus,
+            photoUrl: photoUrl.trim(),
+          };
+          updatedStudentObj = updated;
+          return updated;
+        }
+        return s;
+      });
+
+      if (!updatedStudentObj) {
+        const newStudent: Student = {
+          id: (currentUser.details as Student)?.id || `siswa-${Date.now()}`,
+          name: studentName.trim(),
+          nis: studentNis.trim(),
+          nisn: studentNisn.trim(),
+          classRoom: studentClassRoom.trim(),
+          academicYear: studentAcademicYear.trim(),
+          gender: studentGender,
+          birthPlace: studentBirthPlace.trim(),
+          birthDate: studentBirthDate.trim(),
+          fatherName: studentFatherName.trim(),
+          motherName: studentMotherName.trim(),
+          fatherPhone: studentFatherPhone.trim(),
+          motherPhone: studentMotherPhone.trim(),
+          address: studentAddress.trim(),
+          activeStatus: studentActiveStatus,
+          photoUrl: photoUrl.trim(),
+          username: currentUser.username || studentNis.trim() || studentName.toLowerCase().replace(/\s+/g, ''),
+          password: currentUser.password || studentBirthDate.trim(),
+        };
+        updatedStudentObj = newStudent;
+        updatedStudentsList.push(newStudent);
+      }
+
+      setStudents(updatedStudentsList);
+      saveStoredStudents(updatedStudentsList);
+      broadcastAppDataChange({ students: updatedStudentsList });
+
+      const updatedAuthUser: AuthUser = {
+        ...currentUser,
+        name: studentName.trim(),
+        photoUrl: photoUrl.trim(),
+        details: updatedStudentObj,
+      };
+      setCurrentUser(updatedAuthUser);
+      saveStoredCurrentUser(updatedAuthUser);
+
+      setAutoSaveStatus('saved');
+    }, 400);
+
+    return () => {
+      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    };
+  }, [
+    studentName,
+    studentNis,
+    studentNisn,
+    studentClassRoom,
+    studentAcademicYear,
+    studentGender,
+    studentBirthPlace,
+    studentBirthDate,
+    studentFatherName,
+    studentMotherName,
+    studentFatherPhone,
+    studentMotherPhone,
+    studentAddress,
+    studentActiveStatus,
+    currentUser?.role,
+  ]);
+
+  // AUTO-SAVE ENGINE FOR UMUM
+  useEffect(() => {
+    if (!currentUser || currentUser.role !== 'umum' || isInitialLoadRef.current) return;
+
+    setAutoSaveStatus('saving');
+
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+
+    autoSaveTimerRef.current = setTimeout(() => {
+      const updatedGeneralUser: AuthUser = {
+        ...currentUser,
+        name: generalName.trim() || 'Pengunjung Umum',
+        photoUrl: photoUrl.trim(),
+      };
+      setCurrentUser(updatedGeneralUser);
+      saveStoredCurrentUser(updatedGeneralUser);
+      setAutoSaveStatus('saved');
+    }, 400);
+
+    return () => {
+      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    };
+  }, [generalName, currentUser?.role]);
 
   // Handle Photo Upload via File Reader & Auto-Compress
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -295,249 +574,6 @@ export const ProfilSayaView: React.FC<ProfilSayaViewProps> = ({
         saveStoredStudents(updatedStudentsList);
         broadcastAppDataChange({ students: updatedStudentsList });
       }
-    }
-  };
-
-  // Main Save Handler
-  const handleSaveProfile = (e: React.FormEvent) => {
-    e.preventDefault();
-    setErrorMsg(null);
-    setSuccessMsg(null);
-
-    if (!currentUser) {
-      setErrorMsg('Anda harus masuk ke sistem terlebih dahulu.');
-      return;
-    }
-
-    setIsSaving(true);
-
-    try {
-      if (currentUser.role === 'admin') {
-        if (!adminName.trim()) {
-          setErrorMsg('Nama Lengkap Administrator tidak boleh kosong!');
-          setIsSaving(false);
-          return;
-        }
-        if (!adminUsername.trim()) {
-          setErrorMsg('Username Administrator tidak boleh kosong!');
-          setIsSaving(false);
-          return;
-        }
-        if (adminPassword && adminConfirmPassword && adminPassword !== adminConfirmPassword) {
-          setErrorMsg('Konfirmasi kata sandi baru tidak cocok!');
-          setIsSaving(false);
-          return;
-        }
-
-        const finalPassword = adminPassword.trim() || currentUser.password || 'admin';
-        const finalUsername = adminUsername.trim() || 'admin';
-        const finalName = adminName.trim();
-        const finalPhoto = photoUrl.trim();
-
-        const updatedAdminObj = {
-          username: finalUsername,
-          password: finalPassword,
-          name: finalName,
-          photoUrl: finalPhoto,
-        };
-
-        // 1. Save to Stored Admin Account & Broadcast to all tabs & Cloud Firestore
-        saveStoredAdminAccount(updatedAdminObj);
-        broadcastAppDataChange({ adminAccount: updatedAdminObj });
-
-        // 2. Update Current User
-        const updatedAdminUser: AuthUser = {
-          ...currentUser,
-          name: finalName,
-          username: finalUsername,
-          password: finalPassword,
-          photoUrl: finalPhoto,
-        };
-
-        setCurrentUser(updatedAdminUser);
-        saveStoredCurrentUser(updatedAdminUser);
-        setAdminConfirmPassword('');
-        setSuccessMsg('Profil & Kredensial Administrator berhasil disimpan!');
-      } else if (currentUser.role === 'guru') {
-        if (!teacherName.trim()) {
-          setErrorMsg('Nama Lengkap Guru tidak boleh kosong!');
-          setIsSaving(false);
-          return;
-        }
-
-        let updatedTeacherObj: Teacher | null = null;
-
-        // Update in teachers array
-        const updatedTeachersList = teachers.map((t) => {
-          const isMatch =
-            (currentUser.details && 'id' in currentUser.details && t.id === currentUser.details.id) ||
-            t.name.trim().toLowerCase() === currentUser.name.trim().toLowerCase() ||
-            (t.username && t.username.trim().toLowerCase() === (currentUser.username || '').trim().toLowerCase());
-
-          if (isMatch) {
-            const updated: Teacher = {
-              ...t,
-              name: teacherName.trim(),
-              gender: teacherGender,
-              birthPlace: teacherBirthPlace.trim(),
-              birthDate: teacherBirthDate.trim(),
-              position: teacherPosition.trim(),
-              subject: teacherSubject.trim(),
-              nik: teacherNik.trim(),
-              nuptk: teacherNuptk.trim(),
-              nip: teacherNip.trim(),
-              address: teacherAddress.trim(),
-              phone: teacherPhone.trim(),
-              email: teacherEmail.trim(),
-              activeStatus: teacherActiveStatus,
-              photoUrl: photoUrl.trim(),
-            };
-            updatedTeacherObj = updated;
-            return updated;
-          }
-          return t;
-        });
-
-        // If not in list, create/append
-        if (!updatedTeacherObj) {
-          const newTeacher: Teacher = {
-            id: (currentUser.details as Teacher)?.id || `guru-${Date.now()}`,
-            name: teacherName.trim(),
-            gender: teacherGender,
-            birthPlace: teacherBirthPlace.trim(),
-            birthDate: teacherBirthDate.trim(),
-            position: teacherPosition.trim(),
-            subject: teacherSubject.trim(),
-            nik: teacherNik.trim(),
-            nuptk: teacherNuptk.trim(),
-            nip: teacherNip.trim(),
-            address: teacherAddress.trim(),
-            phone: teacherPhone.trim(),
-            email: teacherEmail.trim(),
-            activeStatus: teacherActiveStatus,
-            photoUrl: photoUrl.trim(),
-            username: currentUser.username || teacherName.toLowerCase().replace(/\s+/g, ''),
-            password: currentUser.password || teacherBirthDate.trim(),
-          };
-          updatedTeacherObj = newTeacher;
-          updatedTeachersList.push(newTeacher);
-        }
-
-        setTeachers(updatedTeachersList);
-        saveStoredTeachers(updatedTeachersList);
-
-        // Update current user
-        const updatedAuthUser: AuthUser = {
-          ...currentUser,
-          name: teacherName.trim(),
-          photoUrl: photoUrl.trim(),
-          details: updatedTeacherObj,
-        };
-        setCurrentUser(updatedAuthUser);
-        saveStoredCurrentUser(updatedAuthUser);
-
-        setSuccessMsg('Data Profil Guru berhasil diperbarui dan disinkronkan ke server!');
-      } else if (currentUser.role === 'siswa') {
-        if (!studentName.trim()) {
-          setErrorMsg('Nama Lengkap Siswa tidak boleh kosong!');
-          setIsSaving(false);
-          return;
-        }
-
-        let updatedStudentObj: Student | null = null;
-
-        // Update in students array
-        const updatedStudentsList = students.map((s) => {
-          const isMatch =
-            (currentUser.details && 'id' in currentUser.details && s.id === currentUser.details.id) ||
-            s.name.trim().toLowerCase() === currentUser.name.trim().toLowerCase() ||
-            (s.username && s.username.trim().toLowerCase() === (currentUser.username || '').trim().toLowerCase()) ||
-            (s.nis && s.nis.trim() === (currentUser.username || '').trim());
-
-          if (isMatch) {
-            const updated: Student = {
-              ...s,
-              name: studentName.trim(),
-              nis: studentNis.trim(),
-              nisn: studentNisn.trim(),
-              classRoom: studentClassRoom.trim(),
-              academicYear: studentAcademicYear.trim(),
-              gender: studentGender,
-              birthPlace: studentBirthPlace.trim(),
-              birthDate: studentBirthDate.trim(),
-              fatherName: studentFatherName.trim(),
-              motherName: studentMotherName.trim(),
-              fatherPhone: studentFatherPhone.trim(),
-              motherPhone: studentMotherPhone.trim(),
-              address: studentAddress.trim(),
-              activeStatus: studentActiveStatus,
-              photoUrl: photoUrl.trim(),
-            };
-            updatedStudentObj = updated;
-            return updated;
-          }
-          return s;
-        });
-
-        // If not in list, create/append
-        if (!updatedStudentObj) {
-          const newStudent: Student = {
-            id: (currentUser.details as Student)?.id || `siswa-${Date.now()}`,
-            name: studentName.trim(),
-            nis: studentNis.trim(),
-            nisn: studentNisn.trim(),
-            classRoom: studentClassRoom.trim(),
-            academicYear: studentAcademicYear.trim(),
-            gender: studentGender,
-            birthPlace: studentBirthPlace.trim(),
-            birthDate: studentBirthDate.trim(),
-            fatherName: studentFatherName.trim(),
-            motherName: studentMotherName.trim(),
-            fatherPhone: studentFatherPhone.trim(),
-            motherPhone: studentMotherPhone.trim(),
-            address: studentAddress.trim(),
-            activeStatus: studentActiveStatus,
-            photoUrl: photoUrl.trim(),
-            username: currentUser.username || studentNis.trim() || studentName.toLowerCase().replace(/\s+/g, ''),
-            password: currentUser.password || studentBirthDate.trim(),
-          };
-          updatedStudentObj = newStudent;
-          updatedStudentsList.push(newStudent);
-        }
-
-        setStudents(updatedStudentsList);
-        saveStoredStudents(updatedStudentsList);
-
-        // Update current user
-        const updatedAuthUser: AuthUser = {
-          ...currentUser,
-          name: studentName.trim(),
-          photoUrl: photoUrl.trim(),
-          details: updatedStudentObj,
-        };
-        setCurrentUser(updatedAuthUser);
-        saveStoredCurrentUser(updatedAuthUser);
-
-        setSuccessMsg('Data Profil Siswa berhasil diperbarui dan disinkronkan ke server!');
-      } else {
-        // Umum
-        const updatedGeneralUser: AuthUser = {
-          ...currentUser,
-          name: generalName.trim() || 'Pengunjung Umum',
-          photoUrl: photoUrl.trim(),
-        };
-        setCurrentUser(updatedGeneralUser);
-        saveStoredCurrentUser(updatedGeneralUser);
-        setSuccessMsg('Profil Pengunjung berhasil disimpan!');
-      }
-
-      setTimeout(() => {
-        setSuccessMsg(null);
-      }, 4000);
-    } catch (err) {
-      setErrorMsg('Terjadi kesalahan saat menyimpan profil. Silakan coba lagi.');
-    } finally {
-      setIsSaving(false);
     }
   };
 
@@ -666,11 +702,28 @@ export const ProfilSayaView: React.FC<ProfilSayaViewProps> = ({
           </div>
 
           <div className="text-center sm:text-left space-y-2 flex-1 min-w-0">
-            <div
-              className={`inline-flex items-center gap-2 px-3 py-1 rounded-full border text-xs font-bold uppercase tracking-wider mb-1 ${roleConfig.badgeBg}`}
-            >
-              <RoleIcon className="w-4 h-4" />
-              <span>{roleConfig.title}</span>
+            <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 mb-1">
+              <div
+                className={`inline-flex items-center gap-2 px-3 py-1 rounded-full border text-xs font-bold uppercase tracking-wider ${roleConfig.badgeBg}`}
+              >
+                <RoleIcon className="w-4 h-4" />
+                <span>{roleConfig.title}</span>
+              </div>
+
+              {/* Real-time Auto-Save Status Badge */}
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-950/80 border border-slate-700/80 shadow-inner">
+                {autoSaveStatus === 'saving' ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 text-amber-400 animate-spin" />
+                    <span className="text-[11px] font-bold text-amber-300">Menyimpan otomatis...</span>
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                    <span className="text-[11px] font-bold text-emerald-300">Tersimpan Otomatis</span>
+                  </>
+                )}
+              </div>
             </div>
 
             <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight truncate">
@@ -707,7 +760,7 @@ export const ProfilSayaView: React.FC<ProfilSayaViewProps> = ({
       )}
 
       {/* FORM SECTION */}
-      <form onSubmit={handleSaveProfile} className="space-y-6">
+      <form onSubmit={(e) => e.preventDefault()} className="space-y-6">
         <input
           type="file"
           ref={fileInputRef}
@@ -1256,7 +1309,7 @@ export const ProfilSayaView: React.FC<ProfilSayaViewProps> = ({
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
               {/* Username */}
-              <div className="space-y-1.5 md:col-span-2">
+              <div className="space-y-1.5">
                 <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider">
                   Username / ID Log In Admin <span className="text-rose-400">*</span>
                 </label>
@@ -1292,52 +1345,9 @@ export const ProfilSayaView: React.FC<ProfilSayaViewProps> = ({
                   </button>
                 </div>
               </div>
-
-              {/* Konfirmasi Password */}
-              <div className="space-y-1.5">
-                <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider">
-                  Konfirmasi Kata Sandi Baru
-                </label>
-                <div className="relative">
-                  <input
-                    type={showConfirmPassword ? 'text' : 'password'}
-                    value={adminConfirmPassword}
-                    onChange={(e) => setAdminConfirmPassword(e.target.value)}
-                    placeholder="Ulangi kata sandi baru..."
-                    className="w-full pl-4 pr-11 py-3 bg-slate-950 border border-slate-700 rounded-xl text-xs sm:text-sm text-slate-100 font-bold focus:outline-none focus:ring-2 focus:ring-amber-400 shadow-inner"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                    className="absolute right-3.5 top-3.5 text-slate-400 hover:text-slate-200 cursor-pointer"
-                  >
-                    {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
-                </div>
-              </div>
             </div>
           </div>
         )}
-
-        {/* SAVE BUTTON */}
-        <div className="flex justify-end pt-2">
-          <button
-            type="submit"
-            disabled={isSaving}
-            className="w-full sm:w-auto px-8 py-3.5 bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 hover:from-amber-400 hover:to-yellow-300 text-slate-950 font-black rounded-2xl shadow-xl shadow-amber-500/20 transition-all cursor-pointer flex items-center justify-center gap-2 text-sm sm:text-base hover:scale-[1.01]"
-          >
-            <Save className="w-5 h-5" />
-            <span>
-              {isSaving
-                ? 'Menyimpan Perubahan...'
-                : currentUser.role === 'guru'
-                ? 'Simpan Perubahan Data Guru'
-                : currentUser.role === 'siswa'
-                ? 'Simpan Perubahan Data Siswa'
-                : 'Simpan Perubahan Profil'}
-            </span>
-          </button>
-        </div>
       </form>
     </div>
   );
