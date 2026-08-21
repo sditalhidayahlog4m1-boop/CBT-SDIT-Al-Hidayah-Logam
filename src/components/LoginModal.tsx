@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { Teacher, Student, AuthUser } from '../types';
 import { SchoolProfile, getStoredAdminAccount, saveStoredAdminAccount, AdminAccount } from '../utils/storage';
+import { saveAppDataToFirestore } from '../utils/firebaseSync';
 
 interface LoginModalProps {
   isOpen: boolean;
@@ -495,10 +496,12 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       name: adminFullName.trim(),
       username: adminUsername.trim(),
       password: updatedPassword,
+      photoUrl: currentAdmin.photoUrl || '',
     };
 
     saveStoredAdminAccount(updatedAdmin);
     setAdminConfig(updatedAdmin);
+    saveAppDataToFirestore({ adminAccount: updatedAdmin });
 
     // Update active currentUser if currently logged in as admin
     if (currentUser?.role === 'admin') {

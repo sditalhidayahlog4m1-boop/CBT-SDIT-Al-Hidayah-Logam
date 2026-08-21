@@ -36,6 +36,8 @@ import {
   saveStoredSchoolProfile,
   getStoredGameData,
   saveStoredGameData,
+  getStoredAdminAccount,
+  saveStoredAdminAccount,
 } from './utils/storage';
 
 import { Sidebar } from './components/Sidebar';
@@ -67,6 +69,8 @@ import {
   resetAllDataInFirestore,
   subscribeToAppData,
   trackUserLoginInFirestore,
+  syncExamResultToFirestore,
+  syncGameLogToFirestore,
   AppData,
 } from './utils/firebaseSync';
 import { isDeepEqual } from './utils/deepEqual';
@@ -75,9 +79,6 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-
-  // Sync Overlay state
-  const [isSyncingServer, setIsSyncingServer] = useState(true);
 
   // User Authentication State
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(getStoredCurrentUser);
@@ -106,7 +107,7 @@ export default function App() {
     bank: QuestionBank;
   } | null>(null);
 
-  // Track last synced data from Firestore to prevent echo writes
+  // Track last synced data from Firestore to prevent unnecessary write loops
   const lastSyncedDataRef = useRef<AppData | null>(null);
   const hasFinishedInitialSyncRef = useRef(false);
 
@@ -143,11 +144,64 @@ export default function App() {
       setTeachers(data.teachers);
       saveStoredTeachers(data.teachers);
       lastSyncedDataRef.current.teachers = data.teachers;
+
+      // Realtime session update if current user is Guru
+      setCurrentUser((prev) => {
+        if (prev && prev.role === 'guru') {
+          const matched = data.teachers!.find(
+            (t) =>
+              (prev.details && 'id' in prev.details && t.id === prev.details.id) ||
+              t.name.trim().toLowerCase() === prev.name.trim().toLowerCase() ||
+              (t.username && t.username.trim().toLowerCase() === (prev.username || '').trim().toLowerCase())
+          );
+          if (matched) {
+            const updated: AuthUser = {
+              ...prev,
+              name: matched.name,
+              username: matched.username || prev.username,
+              password: matched.password || matched.birthDate || prev.password,
+              photoUrl: matched.photoUrl !== undefined ? matched.photoUrl : prev.photoUrl,
+              birthDate: matched.birthDate || prev.birthDate,
+              details: matched,
+            };
+            saveStoredCurrentUser(updated);
+            return updated;
+          }
+        }
+        return prev;
+      });
     }
     if (Array.isArray(data.students) && !isDeepEqual(studentsRef.current, data.students)) {
       setStudents(data.students);
       saveStoredStudents(data.students);
       lastSyncedDataRef.current.students = data.students;
+
+      // Realtime session update if current user is Siswa
+      setCurrentUser((prev) => {
+        if (prev && prev.role === 'siswa') {
+          const matched = data.students!.find(
+            (s) =>
+              (prev.details && 'id' in prev.details && s.id === prev.details.id) ||
+              s.name.trim().toLowerCase() === prev.name.trim().toLowerCase() ||
+              (s.username && s.username.trim().toLowerCase() === (prev.username || '').trim().toLowerCase()) ||
+              (s.nis && s.nis.trim() === (prev.username || '').trim())
+          );
+          if (matched) {
+            const updated: AuthUser = {
+              ...prev,
+              name: matched.name,
+              username: matched.username || prev.username,
+              password: matched.password || matched.birthDate || prev.password,
+              photoUrl: matched.photoUrl !== undefined ? matched.photoUrl : prev.photoUrl,
+              birthDate: matched.birthDate || prev.birthDate,
+              details: matched,
+            };
+            saveStoredCurrentUser(updated);
+            return updated;
+          }
+        }
+        return prev;
+      });
     }
     if (Array.isArray(data.subjects) && !isDeepEqual(subjectsRef.current, data.subjects)) {
       setSubjects(data.subjects);
@@ -189,15 +243,35 @@ export default function App() {
       saveStoredGameData(data.gameData);
       lastSyncedDataRef.current.gameData = data.gameData;
     }
+    if (data.adminAccount && !isDeepEqual(getStoredAdminAccount(), data.adminAccount)) {
+      saveStoredAdminAccount(data.adminAccount);
+      lastSyncedDataRef.current.adminAccount = data.adminAccount;
+
+      // Realtime session update if current user is Admin
+      setCurrentUser((prev) => {
+        if (prev && prev.role === 'admin') {
+          const updated: AuthUser = {
+            ...prev,
+            name: data.adminAccount!.name || prev.name,
+            username: data.adminAccount!.username || prev.username,
+            password: data.adminAccount!.password || prev.password,
+            photoUrl: data.adminAccount!.photoUrl !== undefined ? data.adminAccount!.photoUrl : prev.photoUrl,
+          };
+          saveStoredCurrentUser(updated);
+          return updated;
+        }
+        return prev;
+      });
+    }
   };
 
-  // Initial Firestore Sync and Realtime Subscription
+  // Initial Firestore Sync and Realtime Subscription for ALL roles
   useEffect(() => {
     let unsubscribe: (() => void) | null = null;
 
     const performSync = async () => {
       try {
-        const remoteData = await fetchAppDataFromFirestore();
+        const remoteData = await fetchAppDataFromFirestore(true);
         if (remoteData) {
           applyRemoteData(remoteData, false);
         } else {
@@ -213,12 +287,12 @@ export default function App() {
             schoolProfile: schoolProfileRef.current,
             rolePermissions: rolePermissionsRef.current,
             gameData: gameDataRef.current,
+            adminAccount: getStoredAdminAccount(),
           });
         }
       } catch (err) {
-        console.warn('[Firestore] Initial sync failed:', err);
+        console.warn('[Firestore] Initial sync note:', err);
       } finally {
-        setIsSyncingServer(false);
         hasFinishedInitialSyncRef.current = true;
 
         unsubscribe = subscribeToAppData((data, isLocalWrite) => {
@@ -345,16 +419,10 @@ export default function App() {
 
   useEffect(() => {
     saveStoredResults(results);
-    if (hasFinishedInitialSyncRef.current) {
-      saveAppDataToFirestore({ results });
-    }
   }, [results]);
 
   useEffect(() => {
     saveStoredGameLogs(gameLogs);
-    if (hasFinishedInitialSyncRef.current) {
-      saveAppDataToFirestore({ gameLogs });
-    }
   }, [gameLogs]);
 
   useEffect(() => {
@@ -388,9 +456,9 @@ export default function App() {
       if (exists) return prev;
       const updated = [newLog, ...prev];
       saveStoredGameLogs(updated);
-      saveAppDataToFirestore({ gameLogs: updated });
       return updated;
     });
+    syncGameLogToFirestore(newLog);
   };
 
   const handleClearGameLogs = () => {
@@ -471,9 +539,9 @@ export default function App() {
     setResults((prev) => {
       const updated = [result, ...prev];
       saveStoredResults(updated);
-      saveAppDataToFirestore({ results: updated });
       return updated;
     });
+    syncExamResultToFirestore(result);
   };
 
   const handleExitExam = () => {

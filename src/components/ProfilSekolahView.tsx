@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { AuthUser, Teacher, Student, Subject } from '../types';
 import { SchoolProfile, getStoredSchoolProfile, saveStoredSchoolProfile } from '../utils/storage';
+import { compressImage } from '../utils/imageCompressor';
 
 interface ProfilSekolahViewProps {
   currentUser?: AuthUser | null;
@@ -80,31 +81,29 @@ export const ProfilSekolahView: React.FC<ProfilSekolahViewProps> = ({
     setTimeout(() => setSuccessMessage(null), 4000);
   };
 
-  const handleLogoFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleLogoFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (file.size > 5 * 1024 * 1024) {
-      alert('Ukuran file terlalu besar. Harap unggah gambar di bawah 5MB.');
+    if (file.size > 10 * 1024 * 1024) {
+      alert('Ukuran file terlalu besar. Harap unggah gambar di bawah 10MB.');
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      const dataUrl = evt.target?.result as string;
-      if (dataUrl) {
-        const updated = { ...profile, logoUrl: dataUrl };
-        setProfile(updated);
-        setEditForm(prev => ({ ...prev, logoUrl: dataUrl }));
-        saveStoredSchoolProfile(updated);
-        if (onUpdateSchoolProfile) {
-          onUpdateSchoolProfile(updated);
-        }
-        setSuccessMessage('Logo sekolah berhasil diunggah & tersinkronisasi di seluruh aplikasi!');
-        setTimeout(() => setSuccessMessage(null), 4000);
+    try {
+      const compressedLogo = await compressImage(file, 256, 256, 0.85);
+      const updated = { ...profile, logoUrl: compressedLogo };
+      setProfile(updated);
+      setEditForm((prev) => ({ ...prev, logoUrl: compressedLogo }));
+      saveStoredSchoolProfile(updated);
+      if (onUpdateSchoolProfile) {
+        onUpdateSchoolProfile(updated);
       }
-    };
-    reader.readAsDataURL(file);
+      setSuccessMessage('Logo sekolah berhasil diunggah & tersinkronisasi di seluruh aplikasi!');
+      setTimeout(() => setSuccessMessage(null), 4000);
+    } catch (err) {
+      console.warn('Error uploading logo:', err);
+    }
 
     if (e.target) {
       e.target.value = '';

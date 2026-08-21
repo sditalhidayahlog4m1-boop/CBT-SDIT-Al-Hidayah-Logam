@@ -2,7 +2,7 @@
   "entities": {
     "app_data": {
       "title": "AppData",
-      "description": "Dokumen tunggal penyimpan data aplikasi sekolah, bank soal, guru, siswa, hasil ujian, riwayat game, profil sekolah, hak akses, dan log login.",
+      "description": "Dokumen tunggal penyimpan data aplikasi sekolah, bank soal, guru, siswa, hasil ujian, riwayat game, profil sekolah, hak akses, kredensial admin, dan log login.",
       "type": "object",
       "properties": {
         "teachers": {
@@ -44,6 +44,10 @@
         "gameData": {
           "type": "object",
           "description": "Data simpanan game edukasi interaktif"
+        },
+        "adminAccount": {
+          "type": "object",
+          "description": "Kredensial dan akun administrator tersinkronisasi"
         },
         "updatedAt": {
           "type": "string",

@@ -19,7 +19,7 @@ import {
   UserLoginLog,
   RolePermissions,
 } from '../types';
-import { SchoolProfile } from './storage';
+import { SchoolProfile, AdminAccount } from './storage';
 import firebaseConfigRaw from '../../firebase-applet-config.json';
 
 export interface AppData {
@@ -33,6 +33,7 @@ export interface AppData {
   schoolProfile?: SchoolProfile;
   rolePermissions?: RolePermissions;
   gameData?: Record<string, any>;
+  adminAccount?: AdminAccount;
   updatedAt?: string;
 }
 
@@ -143,6 +144,32 @@ export function subscribeToAppData(
   } catch (err) {
     console.warn('[Firestore Realtime Subscription Warning]:', err);
     return null;
+  }
+}
+
+// Safely append/update an exam result to prevent overwriting other students' results
+export async function syncExamResultToFirestore(result: ExamResult): Promise<void> {
+  try {
+    const current = await fetchAppDataFromFirestore(true);
+    const existingResults: ExamResult[] = current?.results || [];
+    const filtered = existingResults.filter((r) => r.id !== result.id);
+    const updated = [result, ...filtered];
+    await saveAppDataToFirestore({ results: updated });
+  } catch (err) {
+    console.warn('[Firestore] Unable to append exam result:', err);
+  }
+}
+
+// Safely append/update a game log to prevent overwriting other students' logs
+export async function syncGameLogToFirestore(log: GameHistoryLog): Promise<void> {
+  try {
+    const current = await fetchAppDataFromFirestore(true);
+    const existingLogs: GameHistoryLog[] = current?.gameLogs || [];
+    const filtered = existingLogs.filter((l) => l.id !== log.id);
+    const updated = [log, ...filtered];
+    await saveAppDataToFirestore({ gameLogs: updated });
+  } catch (err) {
+    console.warn('[Firestore] Unable to append game log:', err);
   }
 }
 

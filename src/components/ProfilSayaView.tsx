@@ -34,6 +34,8 @@ import {
   saveStoredTeachers,
   saveStoredStudents,
 } from '../utils/storage';
+import { saveAppDataToFirestore } from '../utils/firebaseSync';
+import { compressImage } from '../utils/imageCompressor';
 
 interface ProfilSayaViewProps {
   currentUser: AuthUser | null;
@@ -200,58 +202,61 @@ export const ProfilSayaView: React.FC<ProfilSayaViewProps> = ({
     }
   }, [currentUser, teachers, students]);
 
-  // Handle Photo Upload via File Reader
-  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Handle Photo Upload via File Reader & Auto-Compress
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (file.size > 5 * 1024 * 1024) {
-      setErrorMsg('Ukuran file foto maksimal 5 MB!');
+    if (file.size > 10 * 1024 * 1024) {
+      setErrorMsg('Ukuran file foto maksimal 10 MB!');
       return;
     }
 
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      if (typeof reader.result === 'string') {
-        const newPhoto = reader.result;
-        setPhotoUrl(newPhoto);
-        setErrorMsg(null);
+    try {
+      // Auto compress photo to ~20KB so Firestore syncing is instantaneous
+      const compressedPhoto = await compressImage(file, 300, 300, 0.75);
+      setPhotoUrl(compressedPhoto);
+      setErrorMsg(null);
 
-        // Realtime instant sync to current user and respective records
-        if (currentUser) {
-          const updatedUser: AuthUser = { ...currentUser, photoUrl: newPhoto };
-          setCurrentUser(updatedUser);
-          saveStoredCurrentUser(updatedUser);
+      // Realtime instant sync to current user and respective records
+      if (currentUser) {
+        const updatedUser: AuthUser = { ...currentUser, photoUrl: compressedPhoto };
+        setCurrentUser(updatedUser);
+        saveStoredCurrentUser(updatedUser);
 
-          if (currentUser.role === 'admin') {
-            const storedAdmin = getStoredAdminAccount();
-            saveStoredAdminAccount({ ...storedAdmin, photoUrl: newPhoto });
-          } else if (currentUser.role === 'guru') {
-            const updatedTeachersList = teachers.map((t) => {
-              const isMatch =
-                (currentUser.details && 'id' in currentUser.details && t.id === currentUser.details.id) ||
-                t.name.trim().toLowerCase() === currentUser.name.trim().toLowerCase() ||
-                (t.username && t.username.trim().toLowerCase() === (currentUser.username || '').trim().toLowerCase());
-              return isMatch ? { ...t, photoUrl: newPhoto } : t;
-            });
-            setTeachers(updatedTeachersList);
-            saveStoredTeachers(updatedTeachersList);
-          } else if (currentUser.role === 'siswa') {
-            const updatedStudentsList = students.map((s) => {
-              const isMatch =
-                (currentUser.details && 'id' in currentUser.details && s.id === currentUser.details.id) ||
-                s.name.trim().toLowerCase() === currentUser.name.trim().toLowerCase() ||
-                (s.username && s.username.trim().toLowerCase() === (currentUser.username || '').trim().toLowerCase()) ||
-                (s.nis && s.nis.trim() === (currentUser.username || '').trim());
-              return isMatch ? { ...s, photoUrl: newPhoto } : s;
-            });
-            setStudents(updatedStudentsList);
-            saveStoredStudents(updatedStudentsList);
-          }
+        if (currentUser.role === 'admin') {
+          const storedAdmin = getStoredAdminAccount();
+          const updatedAdmin = { ...storedAdmin, photoUrl: compressedPhoto };
+          saveStoredAdminAccount(updatedAdmin);
+          saveAppDataToFirestore({ adminAccount: updatedAdmin });
+        } else if (currentUser.role === 'guru') {
+          const updatedTeachersList = teachers.map((t) => {
+            const isMatch =
+              (currentUser.details && 'id' in currentUser.details && t.id === currentUser.details.id) ||
+              t.name.trim().toLowerCase() === currentUser.name.trim().toLowerCase() ||
+              (t.username && t.username.trim().toLowerCase() === (currentUser.username || '').trim().toLowerCase());
+            return isMatch ? { ...t, photoUrl: compressedPhoto } : t;
+          });
+          setTeachers(updatedTeachersList);
+          saveStoredTeachers(updatedTeachersList);
+          saveAppDataToFirestore({ teachers: updatedTeachersList });
+        } else if (currentUser.role === 'siswa') {
+          const updatedStudentsList = students.map((s) => {
+            const isMatch =
+              (currentUser.details && 'id' in currentUser.details && s.id === currentUser.details.id) ||
+              s.name.trim().toLowerCase() === currentUser.name.trim().toLowerCase() ||
+              (s.username && s.username.trim().toLowerCase() === (currentUser.username || '').trim().toLowerCase()) ||
+              (s.nis && s.nis.trim() === (currentUser.username || '').trim());
+            return isMatch ? { ...s, photoUrl: compressedPhoto } : s;
+          });
+          setStudents(updatedStudentsList);
+          saveStoredStudents(updatedStudentsList);
+          saveAppDataToFirestore({ students: updatedStudentsList });
         }
       }
-    };
-    reader.readAsDataURL(file);
+    } catch (err: any) {
+      setErrorMsg('Gagal memproses foto: ' + (err?.message || 'Error'));
+    }
   };
 
   const handleRemovePhoto = () => {
@@ -263,7 +268,9 @@ export const ProfilSayaView: React.FC<ProfilSayaViewProps> = ({
 
       if (currentUser.role === 'admin') {
         const storedAdmin = getStoredAdminAccount();
-        saveStoredAdminAccount({ ...storedAdmin, photoUrl: '' });
+        const updatedAdmin = { ...storedAdmin, photoUrl: '' };
+        saveStoredAdminAccount(updatedAdmin);
+        saveAppDataToFirestore({ adminAccount: updatedAdmin });
       } else if (currentUser.role === 'guru') {
         const updatedTeachersList = teachers.map((t) => {
           const isMatch =
@@ -274,6 +281,7 @@ export const ProfilSayaView: React.FC<ProfilSayaViewProps> = ({
         });
         setTeachers(updatedTeachersList);
         saveStoredTeachers(updatedTeachersList);
+        saveAppDataToFirestore({ teachers: updatedTeachersList });
       } else if (currentUser.role === 'siswa') {
         const updatedStudentsList = students.map((s) => {
           const isMatch =
@@ -285,6 +293,7 @@ export const ProfilSayaView: React.FC<ProfilSayaViewProps> = ({
         });
         setStudents(updatedStudentsList);
         saveStoredStudents(updatedStudentsList);
+        saveAppDataToFirestore({ students: updatedStudentsList });
       }
     }
   };
@@ -323,13 +332,18 @@ export const ProfilSayaView: React.FC<ProfilSayaViewProps> = ({
         const finalPassword = adminPassword.trim() || currentUser.password || 'admin';
         const finalUsername = adminUsername.trim() || 'admin';
         const finalName = adminName.trim();
+        const finalPhoto = photoUrl.trim();
 
-        // 1. Save to Stored Admin Account
-        saveStoredAdminAccount({
+        const updatedAdminObj = {
           username: finalUsername,
           password: finalPassword,
           name: finalName,
-        });
+          photoUrl: finalPhoto,
+        };
+
+        // 1. Save to Stored Admin Account & Cloud Firestore
+        saveStoredAdminAccount(updatedAdminObj);
+        saveAppDataToFirestore({ adminAccount: updatedAdminObj });
 
         // 2. Update Current User
         const updatedAdminUser: AuthUser = {
@@ -337,7 +351,7 @@ export const ProfilSayaView: React.FC<ProfilSayaViewProps> = ({
           name: finalName,
           username: finalUsername,
           password: finalPassword,
-          photoUrl: photoUrl.trim(),
+          photoUrl: finalPhoto,
         };
 
         setCurrentUser(updatedAdminUser);
