@@ -147,6 +147,7 @@ export const AiQuestionGeneratorView: React.FC<AiQuestionGeneratorViewProps> = (
   const [isCustomClassRoom, setIsCustomClassRoom] = useState(false);
 
   const [totalQuestionsText, setTotalQuestionsText] = useState('5');
+  const [difficulty, setDifficulty] = useState<'Mudah' | 'Sedang' | 'Sulit'>('Sedang');
   const [topic, setTopic] = useState('');
 
   const [isLoading, setIsLoading] = useState(false);
@@ -218,6 +219,7 @@ export const AiQuestionGeneratorView: React.FC<AiQuestionGeneratorViewProps> = (
           classRoom,
           totalQuestions: numQuestions,
           topic,
+          difficulty,
         }),
       });
 
@@ -602,6 +604,77 @@ export const AiQuestionGeneratorView: React.FC<AiQuestionGeneratorViewProps> = (
             <p className="text-[10px] text-slate-400 mt-1">
               Input ketik biasa. Tidak berubah saat di-scroll mouse.
             </p>
+          </div>
+        </div>
+
+        {/* Row: Tingkat Kesulitan */}
+        <div>
+          <label className="block text-xs font-bold text-slate-300 mb-1.5 flex items-center justify-between">
+            <span className="flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-amber-400" /> Tingkat Kesulitan & Model Soal
+            </span>
+            <span className="text-[10px] text-slate-400">Sinkronisasi Jenjang & Kesulitan</span>
+          </label>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+            <button
+              type="button"
+              onClick={() => setDifficulty('Mudah')}
+              className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                difficulty === 'Mudah'
+                  ? 'bg-emerald-950/40 border-emerald-500 text-white shadow-md shadow-emerald-900/30'
+                  : 'bg-slate-800/50 border-slate-700/80 text-slate-400 hover:border-slate-600 hover:text-slate-200'
+              }`}
+            >
+              <div className="flex items-center justify-between mb-1">
+                <span className={`text-xs font-bold ${difficulty === 'Mudah' ? 'text-emerald-400' : 'text-slate-300'}`}>
+                  🟢 Level Mudah
+                </span>
+                {difficulty === 'Mudah' && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />}
+              </div>
+              <p className="text-[10px] text-slate-300 leading-tight">
+                Pertanyaan lugas dan langsung menguji pemahaman dasar/definisi dengan pilihan jawaban yang jelas.
+              </p>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setDifficulty('Sedang')}
+              className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                difficulty === 'Sedang'
+                  ? 'bg-indigo-950/40 border-indigo-500 text-white shadow-md shadow-indigo-900/30'
+                  : 'bg-slate-800/50 border-slate-700/80 text-slate-400 hover:border-slate-600 hover:text-slate-200'
+              }`}
+            >
+              <div className="flex items-center justify-between mb-1">
+                <span className={`text-xs font-bold ${difficulty === 'Sedang' ? 'text-indigo-400' : 'text-slate-300'}`}>
+                  🔵 Level Sedang
+                </span>
+                {difficulty === 'Sedang' && <CheckCircle2 className="w-3.5 h-3.5 text-indigo-400" />}
+              </div>
+              <p className="text-[10px] text-slate-300 leading-tight">
+                Menguji pemahaman konsep, hukum kaidah, dan korelasi antar komponen materi.
+              </p>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setDifficulty('Sulit')}
+              className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                difficulty === 'Sulit'
+                  ? 'bg-rose-950/40 border-rose-500 text-white shadow-md shadow-rose-900/30'
+                  : 'bg-slate-800/50 border-slate-700/80 text-slate-400 hover:border-slate-600 hover:text-slate-200'
+              }`}
+            >
+              <div className="flex items-center justify-between mb-1">
+                <span className={`text-xs font-bold ${difficulty === 'Sulit' ? 'text-rose-400' : 'text-slate-300'}`}>
+                  🔴 Level Sulit (HOTS)
+                </span>
+                {difficulty === 'Sulit' && <CheckCircle2 className="w-3.5 h-3.5 text-rose-400" />}
+              </div>
+              <p className="text-[10px] text-slate-300 leading-tight">
+                Soal penalaran analitis (HOTS), evaluasi kasus kritis, dan studi pemecahan masalah.
+              </p>
+            </button>
           </div>
         </div>
 

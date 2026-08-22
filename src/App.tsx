@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Teacher,
   Student,
@@ -459,7 +459,7 @@ export default function App() {
     }
   }, [schoolProfile]);
 
-  const handleSaveGameLog = (newLog: GameHistoryLog) => {
+  const handleSaveGameLog = useCallback((newLog: GameHistoryLog) => {
     setGameLogs((prev) => {
       const exists = prev.some((l) => l.id === newLog.id);
       if (exists) return prev;
@@ -468,24 +468,24 @@ export default function App() {
       return updated;
     });
     syncGameLogToFirestore(newLog);
-  };
+  }, []);
 
-  const handleClearGameLogs = () => {
+  const handleClearGameLogs = useCallback(() => {
     setGameLogs([]);
     saveStoredGameLogs([]);
     saveAppDataToFirestore({ gameLogs: [] });
-  };
+  }, []);
 
-  const handleDeleteGameLog = (id: string) => {
+  const handleDeleteGameLog = useCallback((id: string) => {
     setGameLogs((prev) => {
       const updated = prev.filter((item) => item.id !== id);
       saveStoredGameLogs(updated);
       saveAppDataToFirestore({ gameLogs: updated });
       return updated;
     });
-  };
+  }, []);
 
-  const handleRefreshGameLogs = async (): Promise<boolean> => {
+  const handleRefreshGameLogs = useCallback(async (): Promise<boolean> => {
     const data = await fetchAppDataFromFirestore(true);
     if (data && Array.isArray(data.gameLogs)) {
       setGameLogs(data.gameLogs);
@@ -495,13 +495,13 @@ export default function App() {
     const stored = getStoredGameLogs();
     setGameLogs(stored);
     return true;
-  };
+  }, []);
 
-  const handleUpdateGameData = (newGameData: Record<string, any>) => {
+  const handleUpdateGameData = useCallback((newGameData: Record<string, any>) => {
     setGameData(newGameData);
     saveStoredGameData(newGameData);
     saveAppDataToFirestore({ gameData: newGameData });
-  };
+  }, []);
 
   // Auto-open login modal if user is not logged in, or redirect guest if trying to view protected tab
   useEffect(() => {

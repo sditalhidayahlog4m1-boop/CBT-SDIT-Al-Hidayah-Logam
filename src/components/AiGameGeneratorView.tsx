@@ -4,6 +4,7 @@ import { AuthUser, Subject, QuestionBank, Question, GameHistoryLog } from '../ty
 import {
   Gamepad2,
   Sparkles,
+  Loader2,
   Play,
   RotateCcw,
   Trophy,
@@ -353,100 +354,232 @@ export function generateOfflineGameItems(
 
   const result: GameItem[] = [];
 
+  const angles = [
+    {
+      theme: 'Konsep & Definisi',
+      qIslamic: (n: number) => `Soal #${n} (${difficulty}): Dalam mempelajari materi "${topic}" pada mata pelajaran ${subjectName} (${gradeLevel}), apakah pokok ajaran dan pengertian yang paling mendasar?`,
+      aIslamic: `Memahami dan mengamalkan ajaran ${topic} secara ikhlas sesuai syariat`,
+      distIslamic: [
+        `Mengabaikan prinsip utama materi ${topic} demi kepentingan pribadi`,
+        `Mengubah tata cara dan kaidah ${topic} tanpa dasar ilmu`,
+        `Menganggap materi ${topic} tidak perlu dipraktikkan dalam ibadah`,
+      ],
+      explIslamic: `Inti pokok materi ${topic} adalah pemahaman yang benar dan keikhlasan dalam beramal.`,
+      qGeneral: (n: number) => `Soal #${n} (${difficulty}): Berdasarkan pembelajaran materi "${topic}" pada mata pelajaran ${subjectName} (${gradeLevel}), manakah pernyataan yang paling tepat menjelaskan konsep intinya?`,
+      aGeneral: `Prinsip dasar materi ${topic} dipahami secara sistematis dan diterapkan sesuai kaidah keilmuan`,
+      distGeneral: [
+        `Pernyataan yang bertentangan dengan konsep ilmiah materi ${topic}`,
+        `Asumsi perkiraan yang belum teruji kebenarannya dalam konteks ${topic}`,
+        `Penerapan konsep umum yang tidak berhubungan langsung dengan ${topic}`,
+      ],
+      explGeneral: `Konsep pokok ${topic} dibangun di atas kaidah yang sistematis dan teruji.`,
+    },
+    {
+      theme: 'Ciri & Ketentuan Pokok',
+      qIslamic: (n: number) => `Soal #${n} (${difficulty}): Ciri orang yang memahami dan mengamalkan materi "${topic}" dengan baik dalam kehidupan sehari-hari adalah...`,
+      aIslamic: `Senantiasa bertakwa, berakhlak mulia, dan istiqamah menjalankan ketentuan ${topic}`,
+      distIslamic: [
+        `Hanya menjalankan ${topic} saat dilihat oleh orang lain (riya)`,
+        `Merasa paling benar sendiri dan merendahkan orang lain`,
+        `Melalaikan kewajiban lain demi alasan yang tidak syar'i`,
+      ],
+      explIslamic: `Pengamalan materi ${topic} terwujud dalam akhlak mulia dan keistiqamahan.`,
+      qGeneral: (n: number) => `Soal #${n} (${difficulty}): Karakteristik atau ciri utama materi "${topic}" pada ${subjectName} (${gradeLevel}) yang membedakannya adalah...`,
+      aGeneral: `Memiliki kaidah yang terukur dan komponen yang saling berkaitan secara konsisten`,
+      distGeneral: [
+        `Tidak memiliki landasan teori yang jelas dan berubah secara acak`,
+        `Hanya berlaku pada satu kondisi khusus tanpa konsistensi konsep`,
+        `Menyimpang dari tujuan utama pembelajaran kurikulum ${subjectName}`,
+      ],
+      explGeneral: `Karakteristik materi ${topic} ditandai oleh konsistensi kaidah dan komponennya.`,
+    },
+    {
+      theme: 'Penerapan Praktis',
+      qIslamic: (n: number) => `Soal #${n} (${difficulty}): Langkah konkret dalam menerapkan nilai-nilai materi "${topic}" di lingkungan sekolah dan masyarakat adalah...`,
+      aIslamic: `Menebarkan kedamaian, saling tolong-menolong, dan menjaga kejujuran sesuai ajaran ${topic}`,
+      distIslamic: [
+        `Membiarkan kemungkaran dan bersikap acuh tak acuh`,
+        `Mengutamakan perselisihan dibanding musyawarah`,
+        `Mencari keuntungan pribadi yang merugikan orang banyak`,
+      ],
+      explIslamic: `Penerapan praktis ${topic} menghasilkan kedamaian dan kebaikan bersama.`,
+      qGeneral: (n: number) => `Soal #${n} (${difficulty}): Dalam menyelesaikan persoalan terkait materi "${topic}" pada ${subjectName}, langkah terbaik yang harus dilakukan adalah...`,
+      aGeneral: `Menganalisis data permasalahan secara cermat berdasarkan metode dan konsep ${topic}`,
+      distGeneral: [
+        `Menyimpulkan secara tergesa-gesa tanpa melihat data fakta`,
+        `Mengabaikan komponen penting yang mempengaruhi hasil`,
+        `Mengganti rumus baku dengan asumsi yang belum terbukti`,
+      ],
+      explGeneral: `Penyelesaian masalah ${topic} membutuhkan analisis cermat berbasis metode ilmiah.`,
+    },
+    {
+      theme: 'Manfaat & Hikmah',
+      qIslamic: (n: number) => `Soal #${n} (${difficulty}): Hikmah terbesar yang dapat dipetik dari penguasaan materi "${topic}" adalah...`,
+      aIslamic: `Mendekatkan diri kepada Allah SWT serta mempererat tali persaudaraan sesama`,
+      distIslamic: [
+        `Mendapatkan pujian dari sesama manusia semata`,
+        `Menumbuhkan rasa bangga dan takabur atas ilmu yang dimiliki`,
+        `Menjadikan ilmu sebagai alat untuk menjatuhkan pihak lain`,
+      ],
+      explIslamic: `Hikmah mempelajari ${topic} adalah mendekatkan diri kepada Allah dan memperkuat ukhuwah.`,
+      qGeneral: (n: number) => `Soal #${n} (${difficulty}): Manfaat utama penguasaan materi "${topic}" bagi peserta didik adalah...`,
+      aGeneral: `Melatih daya nalar kritis, logis, dan solutif dalam menghadapi berbagai permasalahan`,
+      distGeneral: [
+        `Membatasi kemampuan berpikir hanya pada hafalan tanpa pemahaman`,
+        `Menghambat eksplorasi ide dalam menyelesaikan soal`,
+        `Menghasilkan kesimpulan yang tidak dapat dipertanggungjawabkan`,
+      ],
+      explGeneral: `Penguasaan ${topic} mengasah keterampilan berpikir analitis dan pemecahan masalah.`,
+    },
+    {
+      theme: 'Evaluasi & Kesimpulan',
+      qIslamic: (n: number) => `Soal #${n} (${difficulty}): Bukti nyata keberhasilan seseorang dalam mempelajari materi "${topic}" tercermin dari...`,
+      aIslamic: `Kesesuaian antara ucapan, keyakinan hati, dan tindakan nyata yang bermanfaat`,
+      distIslamic: [
+        `Banyaknya teori yang dihafal tanpa ada pengamalan nyata`,
+        `Kemampuan berdebat untuk memenangkan pendapat pribadi`,
+        `Sikap meremehkan nasihat kebaikan dari sesama`,
+      ],
+      explIslamic: `Indikator pemahaman ${topic} adalah integritas antara hati, lisan, dan perbuatan.`,
+      qGeneral: (n: number) => `Soal #${n} (${difficulty}): Evaluasi akhir terhadap ketercapaian pemahaman materi "${topic}" ditunjukkan oleh...`,
+      aGeneral: `Kemampuan menjelaskan kembali prinsip inti serta memecahkan soal analisis dengan tepat`,
+      distGeneral: [
+        `Ketidakmampuan menghubungkan teori dengan penerapan praktis`,
+        `Hanya menghafal istilah tanpa memahami mekanisme kerjanya`,
+        `Kerap melakukan kesalahan mendasar pada konsep kunci materi ${topic}`,
+      ],
+      explGeneral: `Ketercapaian materi ${topic} dibuktikan oleh pemahaman konsep mendalam dan kemampuan aplikatif.`,
+    },
+  ];
+
   for (let i = 0; i < totalItems; i++) {
     const itemId = `offline-${gameMode}-${Date.now()}-${Math.random().toString(36).substring(2, 6)}-${i}`;
     const num = i + 1;
+    const angle = angles[i % angles.length];
 
     if (gameMode === 'sambung-ayat') {
+      const correct = isIslamic ? `اللَّهُ الصَّمَدُ` : `adalah prinsip dasar yang harus dipahami secara tepat`;
+      const distractors = isIslamic
+        ? [`لَمْ يَلِدْ وَلَمْ يُولَدْ`, `وَلَمْ يَكُنْ لَهُ كُفُوًا أَحَدٌ`, `مِنْ شَرِّ مَا خَلَقَ`]
+        : [`adalah pernyataan yang bertentangan dengan ${topic}`, `tidak memiliki kaitan dengan materi ${topic}`, `merupakan asumsi yang keliru`];
+      const allOpts = [correct, ...distractors].sort(() => Math.random() - 0.5);
+
       result.push({
         id: itemId,
         category: 'sambung-ayat',
         difficulty: difficulty,
         prompt_text: isIslamic
-          ? `[Offline Local] Sambungkan potongan ayat/lafaz berikut (${subjectName} - ${topic} - Soal #${num}):`
-          : `[Offline Local] Lanjutkan/sambungkan potongan kalimat berikut (${subjectName} - ${topic} - Soal #${num}):`,
-        arabic_text: isIslamic ? `مَADَّه ${topic} - ${num}` : undefined,
-        options: [
-          `Sambungan Jawaban Benar #${num}`,
-          `Pilihan Opsi A`,
-          `Pilihan Opsi B`,
-          `Pilihan Opsi C`,
-        ].sort(() => Math.random() - 0.5),
-        correct_answer: `Sambungan Jawaban Benar #${num}`,
-        explanation: `Soal latihan offline mode Sambung Kalimat/Ayat untuk ${subjectName} (${topic}).`,
+          ? `Lanjutkan potongan ayat/kalimat berikut terkait materi "${topic}" (Soal #${num}):`
+          : `Lanjutkan sambungan potongan kalimat materi "${topic}" (Soal #${num}):`,
+        arabic_text: isIslamic ? `قُلْ هُوَ اللَّهُ أَحَدٌ` : undefined,
+        translation: isIslamic ? `Katakanlah: Dialah Allah, Yang Maha Esa.` : undefined,
+        options: allOpts,
+        correct_answer: correct,
+        explanation: `Lanjutan kalimat yang benar sesuai materi "${topic}".`,
         subject_name: subjectName,
       });
     } else if (gameMode === 'melengkapi-ayat') {
+      const correct = isIslamic ? `نَسْتَعِينُ` : `Konsep Pokok`;
+      const distractors = isIslamic
+        ? [`الرَّحْمَٰنِ`, `الْمُسْتَقِيمَ`, `الصِّرَاطَ`]
+        : [`Pengecoh Konsep A`, `Pengecoh Konsep B`, `Pengecoh Konsep C`];
+      const allOpts = [correct, ...distractors].sort(() => Math.random() - 0.5);
+
       result.push({
         id: itemId,
         category: 'melengkapi-ayat',
         difficulty: difficulty,
         prompt_text: isIslamic
-          ? `[Offline Local] Lengkapi kata rumpang (...) dalam materi ${topic} (${subjectName} - Soal #${num}):`
-          : `[Offline Local] Lengkapi kata/istilah yang rumpang "___" dalam kalimat berikut (${subjectName} - Soal #${num}):`,
-        arabic_text: isIslamic ? `Materi ${topic} (...) #${num}` : undefined,
-        options: [
-          `Kata Pelengkap Benar #${num}`,
-          `Kata Opsi A`,
-          `Kata Opsi B`,
-          `Kata Opsi C`,
-        ].sort(() => Math.random() - 0.5),
-        correct_answer: `Kata Pelengkap Benar #${num}`,
-        explanation: `Soal latihan offline mode Melengkapi Kalimat untuk ${subjectName} (${topic}).`,
+          ? `Lengkapi kata/lafaz rumpang (...) dalam materi "${topic}" (Soal #${num}):`
+          : `Lengkapi istilah rumpang "___" dalam pernyataan materi "${topic}" (Soal #${num}):`,
+        arabic_text: isIslamic ? `إِيَّاكَ نَعْبُدُ وَإِيَّاكَ (...)` : undefined,
+        translation: isIslamic ? `Hanya kepada Engkaulah kami menyembah dan hanya kepada Engkaulah kami memohon pertolongan.` : undefined,
+        options: allOpts,
+        correct_answer: correct,
+        explanation: `Istilah yang tepat untuk melengkapi materi "${topic}".`,
         subject_name: subjectName,
       });
     } else if (gameMode === 'tebak-surat') {
+      const correct = isIslamic ? `Surat Al-Falaq` : `${topic}`;
+      const distractors = isIslamic
+        ? [`Surat Al-Ikhlas`, `Surat An-Nas`, `Surat Al-Kautsar`]
+        : [`Pengecoh Topik A`, `Pengecoh Topik B`, `Pengecoh Topik C`];
+      const allOpts = [correct, ...distractors].sort(() => Math.random() - 0.5);
+
       result.push({
         id: itemId,
         category: 'tebak-surat',
         difficulty: difficulty,
         prompt_text: isIslamic
-          ? `[Offline Local] Tentukan nama surat/kategori dari kutipan berikut (${subjectName} - ${topic} - Soal #${num}):`
-          : `[Offline Local] Tentukan istilah/topik dari deskripsi materi berikut (${subjectName} - ${topic} - Soal #${num}):`,
-        options: [
-          `${topic}`,
-          `Pilihan Opsi A`,
-          `Pilihan Opsi B`,
-          `Pilihan Opsi C`,
-        ].sort(() => Math.random() - 0.5),
-        correct_answer: `${topic}`,
-        explanation: `Soal latihan offline mode Tebak Topik/Istilah untuk ${subjectName}.`,
+          ? `Tentukan nama surat dari potongan bacaan materi "${topic}" (Soal #${num}):`
+          : `Tentukan konsep/istilah utama dari pembahasan materi "${topic}" (Soal #${num}):`,
+        arabic_text: isIslamic ? `قُلْ أَعُوذُ بِرَبِّ الْفَلَقِ` : undefined,
+        translation: isIslamic ? `Katakanlah: Aku berlindung kepada Tuhan yang menguasai subuh.` : undefined,
+        options: allOpts,
+        correct_answer: correct,
+        explanation: `Identifikasi topik/surat yang benar sesuai materi "${topic}".`,
         subject_name: subjectName,
       });
     } else if (gameMode === 'tebak-nomor-ayat') {
+      const correct = `Ayat ${((i % 5) + 1)}`;
+      const distractors = [`Ayat ${((i % 5) + 2)}`, `Ayat ${((i % 5) + 3)}`, `Ayat ${((i % 5) + 4)}`];
+      const allOpts = [correct, ...distractors].sort(() => Math.random() - 0.5);
+
       result.push({
         id: itemId,
         category: 'tebak-nomor-ayat',
         difficulty: difficulty,
         prompt_text: isIslamic
-          ? `[Offline Local] Tentukan nomor urut ayat dari materi ${topic} (${subjectName} - Soal #${num}):`
-          : `[Offline Local] Tentukan urutan/angka/tahun hasil perhitungan dari materi ${topic} (${subjectName} - Soal #${num}):`,
-        options: [`Urutan ${num}`, `Urutan ${num + 1}`, `Urutan ${num + 2}`, `Urutan ${num + 3}`].sort(() => Math.random() - 0.5),
-        correct_answer: `Urutan ${num}`,
-        explanation: `Soal latihan offline mode Tebak Urutan untuk ${subjectName}.`,
+          ? `Ayat ke berapakah lafaz berikut dalam materi "${topic}" (Soal #${num}):`
+          : `Urutan ke berapakah prinsip/langkah materi "${topic}" (Soal #${num}):`,
+        arabic_text: isIslamic ? `مِنْ شَرِّ مَا خَلَقَ` : undefined,
+        options: allOpts,
+        correct_answer: correct,
+        explanation: `Urutan yang tepat sesuai susunan materi "${topic}".`,
         subject_name: subjectName,
       });
     } else if (gameMode === 'tebak-audio') {
+      const correct = isIslamic ? `Surat Al-Falaq` : `${topic}`;
+      const distractors = isIslamic
+        ? [`Surat An-Nas`, `Surat Al-Ikhlas`, `Surat Al-Lahab`]
+        : [`Topik Pengecoh X`, `Topik Pengecoh Y`, `Topik Pengecoh Z`];
+      const allOpts = [correct, ...distractors].sort(() => Math.random() - 0.5);
+
       result.push({
         id: itemId,
         category: 'tebak-audio',
         difficulty: difficulty,
-        prompt_text: `[Offline Local] Dengarkan audio dan tebak jawaban materi berikut (${subjectName} - ${topic} - Soal #${num}):`,
-        audio_text: `Pertanyaan latihan audio ${subjectName} mengenai materi ${topic}`,
-        options: [`${topic}`, `Pilihan A`, `Pilihan B`, `Pilihan C`].sort(() => Math.random() - 0.5),
-        correct_answer: `${topic}`,
-        explanation: `Soal latihan offline mode Tebak Audio untuk ${subjectName}.`,
+        surah_number: isIslamic ? 113 : undefined,
+        ayah_number: isIslamic ? 1 : undefined,
+        prompt_text: isIslamic
+          ? `Dengarkan audio bacaan berikut dan tentukan surat yang dibacakan (${topic} - Soal #${num}):`
+          : `Dengarkan narasi audio berikut dan tentukan konsep yang benar (${topic} - Soal #${num}):`,
+        arabic_text: isIslamic ? `قُلْ أَعُوذُ بِرَبِّ الْفَلَقِ` : undefined,
+        translation: isIslamic ? `Katakanlah: Aku berlindung kepada Tuhan yang menguasai subuh.` : undefined,
+        options: allOpts,
+        correct_answer: correct,
+        explanation: `Audio membacakan konten seputar materi "${topic}".`,
         subject_name: subjectName,
       });
     } else if (gameMode === 'puzzle-ayat') {
+      const pieces = isIslamic
+        ? ['بِرَبِّ', 'أَعُوذُ', 'قُلْ', 'الْفَلَقِ']
+        : ['Memahami', 'materi', topic, 'dengan', 'benar'];
+      const order = isIslamic
+        ? ['قُلْ', 'أَعُوذُ', 'بِرَبِّ', 'الْفَلَقِ']
+        : ['Memahami', 'materi', topic, 'dengan', 'benar'];
+      const correctStr = isIslamic ? 'قُلْ أَعُوذُ بِرَبِّ الْفَلَقِ' : `Memahami materi ${topic} dengan benar`;
+
       result.push({
         id: itemId,
         category: 'puzzle-ayat',
         difficulty: difficulty,
-        prompt_text: `[Offline Local] Susunlah kata-kata acak berikut menjadi susunan yang benar (${subjectName} - ${topic} - Soal #${num}):`,
-        puzzle_pieces: ['Pancasila', 'adalah', 'dasar', 'negara'],
-        correct_order: ['Pancasila', 'adalah', 'dasar', 'negara'],
-        explanation: `Urutan kata yang benar adalah: Pancasila adalah dasar negara.`,
+        prompt_text: `Susunlah kata-kata acak berikut menjadi kalimat yang benar seputar "${topic}" (Soal #${num}):`,
+        puzzle_pieces: pieces,
+        correct_order: order,
+        options: [correctStr, 'Susunan Pengecoh A', 'Susunan Pengecoh B', 'Susunan Pengecoh C'].sort(() => Math.random() - 0.5),
+        correct_answer: correctStr,
+        explanation: `Urutan kalimat yang benar adalah: ${correctStr}.`,
         subject_name: subjectName,
       });
     } else if (gameMode === 'memory-card') {
@@ -454,30 +587,29 @@ export function generateOfflineGameItems(
         id: itemId,
         category: 'memory-card',
         difficulty: difficulty,
-        prompt_text: isIslamic ? `Ayat/Kata Latihan #${num}` : `Soal / Istilah #${num}`,
-        translation: isIslamic ? `${subjectName}: ${topic} #${num}` : `Pasangan / Jawaban #${num}`,
-        subject_name: subjectName,
-      });
-    } else if (gameMode === 'ular-tangga-islami') {
-      result.push({
-        id: itemId,
-        category: 'ular-tangga-islami',
-        difficulty: difficulty,
-        prompt_text: `[Offline Local] Pertanyaan Ular Tangga #${num} (${subjectName} - ${topic}):`,
-        options: [`Jawaban Benar #${num}`, `Jawaban A`, `Jawaban B`, `Jawaban C`].sort(() => Math.random() - 0.5),
-        correct_answer: `Jawaban Benar #${num}`,
-        explanation: `Soal latihan offline Ular Tangga untuk ${subjectName} (${topic}).`,
+        prompt_text: isIslamic ? `قُلْ أَعُوذُ بِرَبِّ الْفَلَقِ` : `Konsep: ${topic} #${num}`,
+        translation: isIslamic ? `Aku berlindung kepada Tuhan yang menguasai subuh` : `Kaidah & pembahasan utama materi ${topic} #${num}`,
+        options: ['Opsi A', 'Opsi B', 'Opsi C', 'Opsi D'],
+        correct_answer: isIslamic ? `Aku berlindung kepada Tuhan yang menguasai subuh` : `Kaidah & pembahasan utama materi ${topic} #${num}`,
+        explanation: `Pasangan kartu memori yang sesuai untuk materi "${topic}".`,
         subject_name: subjectName,
       });
     } else {
+      // pilihan-ganda & ular-tangga-islami
+      const qText = isIslamic ? angle.qIslamic(num) : angle.qGeneral(num);
+      const correctAns = isIslamic ? angle.aIslamic : angle.aGeneral;
+      const rawDist = isIslamic ? angle.distIslamic : angle.distGeneral;
+      const expl = isIslamic ? angle.explIslamic : angle.explGeneral;
+      const allOpts = [correctAns, ...rawDist].sort(() => Math.random() - 0.5);
+
       result.push({
         id: itemId,
-        category: 'pilihan-ganda',
+        category: gameMode as any,
         difficulty: difficulty,
-        prompt_text: `[Offline Local] Soal Pilihan Ganda #${num} (${subjectName} - ${topic}):`,
-        options: [`Jawaban Benar #${num}`, `Jawaban A`, `Jawaban B`, `Jawaban C`].sort(() => Math.random() - 0.5),
-        correct_answer: `Jawaban Benar #${num}`,
-        explanation: `Soal latihan offline Pilihan Ganda untuk ${subjectName} (${topic}).`,
+        prompt_text: qText,
+        options: allOpts,
+        correct_answer: correctAns,
+        explanation: expl,
         subject_name: subjectName,
       });
     }
@@ -650,7 +782,10 @@ export const AiGameGeneratorView: React.FC<AiGameGeneratorViewProps> = ({
   // Sync gameDataMap from incoming gameData prop when updated remotely
   useEffect(() => {
     if (gameData && typeof gameData === 'object' && Object.keys(gameData).length > 0) {
-      setGameDataMap(gameData as Record<string, GameItem[]>);
+      setGameDataMap((prev) => {
+        if (JSON.stringify(prev) === JSON.stringify(gameData)) return prev;
+        return gameData as Record<string, GameItem[]>;
+      });
       const activeList = (gameData[activeMode] || []).filter(
         (it: GameItem) => (it.subject_name || selectedSubject) === selectedSubject
       );
@@ -658,7 +793,7 @@ export const AiGameGeneratorView: React.FC<AiGameGeneratorViewProps> = ({
         setGameItems(activeList);
       }
     }
-  }, [gameData]);
+  }, [gameData, activeMode, selectedSubject]);
 
   // Active Game State
   const [gameItems, setGameItems] = useState<GameItem[]>(() => {
@@ -962,19 +1097,17 @@ export const AiGameGeneratorView: React.FC<AiGameGeneratorViewProps> = ({
 
   // Shuffle current active game items & options
   const handleShuffleCurrentGame = () => {
-    setGameDataMap((prevMap) => {
-      const shuffledMap = shuffleGameDataMap(prevMap);
-      try {
-        localStorage.setItem('cbt_game_data', JSON.stringify(shuffledMap));
-      } catch (e) {}
-      onUpdateGameData?.(shuffledMap);
-      const current = shuffledMap[activeMode] || [];
-      setGameItems(current);
-      if (activeMode === 'memory-card') {
-        initMemoryCards(current);
-      }
-      return shuffledMap;
-    });
+    const shuffledMap = shuffleGameDataMap(gameDataMap);
+    try {
+      localStorage.setItem('cbt_game_data', JSON.stringify(shuffledMap));
+    } catch (e) {}
+    setGameDataMap(shuffledMap);
+    onUpdateGameData?.(shuffledMap);
+    const current = shuffledMap[activeMode] || [];
+    setGameItems(current);
+    if (activeMode === 'memory-card') {
+      initMemoryCards(current);
+    }
     resetGameStates();
   };
 
@@ -1061,48 +1194,45 @@ export const AiGameGeneratorView: React.FC<AiGameGeneratorViewProps> = ({
 
   // Scoped Reset: Deletes questions matching selected subject & difficulty level
   const executeResetGame = () => {
-    setGameDataMap((prevMap) => {
-      const nextMap: Record<string, GameItem[]> = {};
+    const nextMap: Record<string, GameItem[]> = {};
 
-      for (const modeKey of Object.keys(prevMap)) {
-        if (resetTargetModeScope === 'current' && modeKey !== activeMode) {
-          nextMap[modeKey] = prevMap[modeKey] || [];
-          continue;
+    for (const modeKey of Object.keys(gameDataMap)) {
+      if (resetTargetModeScope === 'current' && modeKey !== activeMode) {
+        nextMap[modeKey] = gameDataMap[modeKey] || [];
+        continue;
+      }
+
+      const list = gameDataMap[modeKey] || [];
+      nextMap[modeKey] = list.filter((item) => {
+        const itemSubject = item.subject_name || selectedSubject;
+        const itemDiff = item.difficulty || 'Sedang';
+
+        const matchSubject =
+          resetTargetSubject === 'Semua' || itemSubject === resetTargetSubject;
+        const matchDiff =
+          resetTargetDifficulty === 'Semua' || itemDiff === resetTargetDifficulty;
+
+        // Delete only items matching both selected subject & level
+        if (matchSubject && matchDiff) {
+          return false;
         }
+        return true;
+      });
+    }
 
-        const list = prevMap[modeKey] || [];
-        nextMap[modeKey] = list.filter((item) => {
-          const itemSubject = item.subject_name || selectedSubject;
-          const itemDiff = item.difficulty || 'Sedang';
+    try {
+      localStorage.setItem('cbt_game_data', JSON.stringify(nextMap));
+    } catch (e) {}
+    setGameDataMap(nextMap);
+    onUpdateGameData?.(nextMap);
 
-          const matchSubject =
-            resetTargetSubject === 'Semua' || itemSubject === resetTargetSubject;
-          const matchDiff =
-            resetTargetDifficulty === 'Semua' || itemDiff === resetTargetDifficulty;
-
-          // Delete only items matching both selected subject & level
-          if (matchSubject && matchDiff) {
-            return false;
-          }
-          return true;
-        });
-      }
-
-      try {
-        localStorage.setItem('cbt_game_data', JSON.stringify(nextMap));
-      } catch (e) {}
-      onUpdateGameData?.(nextMap);
-
-      const updatedActiveItems = (nextMap[activeMode] || []).filter(
-        (it) => (it.subject_name || selectedSubject) === selectedSubject
-      );
-      setGameItems(updatedActiveItems);
-      if (activeMode === 'memory-card') {
-        initMemoryCards(updatedActiveItems);
-      }
-
-      return nextMap;
-    });
+    const updatedActiveItems = (nextMap[activeMode] || []).filter(
+      (it) => (it.subject_name || selectedSubject) === selectedSubject
+    );
+    setGameItems(updatedActiveItems);
+    if (activeMode === 'memory-card') {
+      initMemoryCards(updatedActiveItems);
+    }
 
     resetGameStates();
     setShowResetModal(false);
@@ -1123,29 +1253,26 @@ export const AiGameGeneratorView: React.FC<AiGameGeneratorViewProps> = ({
 
   // Delete single active question
   const handleDeleteSingleQuestion = (questionId: string) => {
-    setGameDataMap((prevMap) => {
-      const nextMap: Record<string, GameItem[]> = {};
+    const nextMap: Record<string, GameItem[]> = {};
 
-      for (const modeKey of Object.keys(prevMap)) {
-        const list = prevMap[modeKey] || [];
-        nextMap[modeKey] = list.filter((item) => item.id !== questionId);
-      }
+    for (const modeKey of Object.keys(gameDataMap)) {
+      const list = gameDataMap[modeKey] || [];
+      nextMap[modeKey] = list.filter((item) => item.id !== questionId);
+    }
 
-      try {
-        localStorage.setItem('cbt_game_data', JSON.stringify(nextMap));
-      } catch (e) {}
-      onUpdateGameData?.(nextMap);
+    try {
+      localStorage.setItem('cbt_game_data', JSON.stringify(nextMap));
+    } catch (e) {}
+    setGameDataMap(nextMap);
+    onUpdateGameData?.(nextMap);
 
-      const updatedActiveItems = (nextMap[activeMode] || []).filter(
-        (it) => (it.subject_name || selectedSubject) === selectedSubject
-      );
-      setGameItems(updatedActiveItems);
-      if (activeMode === 'memory-card') {
-        initMemoryCards(updatedActiveItems);
-      }
-
-      return nextMap;
-    });
+    const updatedActiveItems = (nextMap[activeMode] || []).filter(
+      (it) => (it.subject_name || selectedSubject) === selectedSubject
+    );
+    setGameItems(updatedActiveItems);
+    if (activeMode === 'memory-card') {
+      initMemoryCards(updatedActiveItems);
+    }
 
     resetGameStates();
     setLastGenMessage('🗑️ 1 Soal berhasil dihapus.');
@@ -1191,20 +1318,18 @@ export const AiGameGeneratorView: React.FC<AiGameGeneratorViewProps> = ({
     setGameItems((prev) => prev.map((item) => (item.id === updatedId ? finalQuestion : item)));
 
     // 2. Update gameDataMap in state and localStorage
-    setGameDataMap((prevMap) => {
-      const nextMap: Record<string, GameItem[]> = {};
+    const nextMap: Record<string, GameItem[]> = {};
 
-      for (const modeKey of Object.keys(prevMap)) {
-        const list = prevMap[modeKey] || [];
-        nextMap[modeKey] = list.map((it) => (it.id === updatedId ? finalQuestion : it));
-      }
+    for (const modeKey of Object.keys(gameDataMap)) {
+      const list = gameDataMap[modeKey] || [];
+      nextMap[modeKey] = list.map((it) => (it.id === updatedId ? finalQuestion : it));
+    }
 
-      try {
-        localStorage.setItem('cbt_game_data', JSON.stringify(nextMap));
-      } catch (err) {}
-      onUpdateGameData?.(nextMap);
-      return nextMap;
-    });
+    try {
+      localStorage.setItem('cbt_game_data', JSON.stringify(nextMap));
+    } catch (err) {}
+    setGameDataMap(nextMap);
+    onUpdateGameData?.(nextMap);
 
     // 3. Update current board question if editing in Ular Tangga
     if (currentBoardQuestion && currentBoardQuestion.id === updatedId) {
@@ -1457,37 +1582,36 @@ export const AiGameGeneratorView: React.FC<AiGameGeneratorViewProps> = ({
   }, [gameFinished, activeMode, score, correctAnswersCount, selectedSubject, selectedDifficultyFilter, difficulty, topicInput, currentUser, activePlayItems, onSaveGameLog]);
 
   const applyNewGeneratedItems = (items: GameItem[], successMsg: string) => {
-    setGameDataMap((prevMap) => {
-      const nextMap = { ...prevMap };
-      const currentModeList = nextMap[activeMode] || [];
+    const currentModeList = gameDataMap[activeMode] || [];
 
-      // Set item baru dengan ID unik & atribut category/subject_name yang konsisten
-      const exclusiveItems: GameItem[] = items.map((raw, idx) => ({
-        ...raw,
-        category: activeMode,
-        difficulty: raw.difficulty || difficulty,
-        id: `game-${Date.now()}-${Math.random().toString(36).substring(2, 7)}-${idx}`,
-        subject_name: raw.subject_name || selectedSubject,
-      }));
+    // Set item baru dengan ID unik & atribut category/subject_name yang konsisten
+    const exclusiveItems: GameItem[] = items.map((raw, idx) => ({
+      ...raw,
+      category: activeMode,
+      difficulty: raw.difficulty || difficulty,
+      id: `game-${Date.now()}-${Math.random().toString(36).substring(2, 7)}-${idx}`,
+      subject_name: raw.subject_name || selectedSubject,
+    }));
 
-      // Akumulasikan soal baru tanpa menghapus soal lama
-      nextMap[activeMode] = [...currentModeList, ...exclusiveItems];
+    // Akumulasikan soal baru tanpa menghapus soal lama
+    const nextMap = {
+      ...gameDataMap,
+      [activeMode]: [...currentModeList, ...exclusiveItems],
+    };
 
-      try {
-        localStorage.setItem('cbt_game_data', JSON.stringify(nextMap));
-      } catch (e) {}
-      onUpdateGameData?.(nextMap);
+    try {
+      localStorage.setItem('cbt_game_data', JSON.stringify(nextMap));
+    } catch (e) {}
+    setGameDataMap(nextMap);
+    onUpdateGameData?.(nextMap);
 
-      const updatedActiveItems = nextMap[activeMode].filter(
-        (it) => it.subject_name === selectedSubject
-      );
-      setGameItems(updatedActiveItems);
-      if (activeMode === 'memory-card') {
-        initMemoryCards(updatedActiveItems);
-      }
-
-      return nextMap;
-    });
+    const updatedActiveItems = nextMap[activeMode].filter(
+      (it) => it.subject_name === selectedSubject
+    );
+    setGameItems(updatedActiveItems);
+    if (activeMode === 'memory-card') {
+      initMemoryCards(updatedActiveItems);
+    }
 
     resetGameStates();
     setLastGenMessage(successMsg);
@@ -1721,11 +1845,19 @@ export const AiGameGeneratorView: React.FC<AiGameGeneratorViewProps> = ({
         playSound('correct');
         speakFeedback(true);
         setTimeout(() => {
-          setCards((prevCards) =>
-            prevCards.map((c, i) =>
+          setCards((prevCards) => {
+            const nextCards = prevCards.map((c, i) =>
               i === idx1 || i === idx2 ? { ...c, matched: true } : c
-            )
-          );
+            );
+            const allMatched = nextCards.every((c) => c.matched);
+            if (allMatched) {
+              setTimeout(() => {
+                setGameFinished(true);
+                playSound('win');
+              }, 100);
+            }
+            return nextCards;
+          });
           setFlippedCards([]);
           setScore((s) => s + 10);
           setCorrectAnswersCount((prev) => prev + 1);
@@ -1735,16 +1867,6 @@ export const AiGameGeneratorView: React.FC<AiGameGeneratorViewProps> = ({
               setLives((l) => Math.min(maxLives, l + 1));
             }
             return nextStreak;
-          });
-
-          // Check if all matched
-          setCards((currentCards) => {
-            const allMatched = currentCards.every((c) => c.matched || c.id === cards[idx1].id || c.id === cards[idx2].id);
-            if (allMatched) {
-              setGameFinished(true);
-              playSound('win');
-            }
-            return currentCards;
           });
         }, 500);
       } else {
@@ -2226,13 +2348,31 @@ export const AiGameGeneratorView: React.FC<AiGameGeneratorViewProps> = ({
 
             {/* Jumlah Soal */}
             <div className="space-y-1">
-              <label className="block text-slate-200 font-bold">Jumlah Soal AI:</label>
+              <div className="flex items-center justify-between">
+                <label className="block text-slate-200 font-bold">Jumlah Soal AI:</label>
+                <div className="flex items-center gap-1">
+                  {['5', '10', '15', '20', '30'].map((num) => (
+                    <button
+                      key={num}
+                      type="button"
+                      onClick={() => setItemCountText(num)}
+                      className={`px-1.5 py-0.5 text-[10px] font-bold rounded cursor-pointer transition-all ${
+                        itemCountText === num
+                          ? 'bg-amber-400 text-slate-950 shadow'
+                          : 'bg-slate-800 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      {num}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <input
                 type="text"
                 value={itemCountText}
                 onChange={(e) => setItemCountText(e.target.value)}
-                placeholder="5, 10, 15"
-                className="w-full px-3 py-2.5 bg-slate-950/90 border border-indigo-500/30 rounded-xl text-slate-100 focus:outline-none focus:border-indigo-400 font-mono font-bold"
+                placeholder="Contoh: 5, 10, 20, 50"
+                className="w-full px-3 py-2 bg-slate-950/90 border border-indigo-500/30 rounded-xl text-slate-100 focus:outline-none focus:border-indigo-400 font-mono font-bold text-xs"
               />
             </div>
           </div>
@@ -2258,7 +2398,7 @@ export const AiGameGeneratorView: React.FC<AiGameGeneratorViewProps> = ({
                   {difficulty === 'Mudah' && <span className="text-[10px] bg-emerald-500 text-slate-950 px-1.5 py-0.2 rounded font-black">AKTIF</span>}
                 </div>
                 <span className="text-[10px] text-slate-300 mt-1 leading-tight">
-                  Soal dasar, pilihan jawaban sangat mudah dibedakan.
+                  Pertanyaan lugas dan langsung menguji pemahaman dasar/definisi dengan pilihan jawaban yang jelas.
                 </span>
               </button>
 
@@ -2276,7 +2416,7 @@ export const AiGameGeneratorView: React.FC<AiGameGeneratorViewProps> = ({
                   {difficulty === 'Sedang' && <span className="text-[10px] bg-amber-400 text-slate-950 px-1.5 py-0.2 rounded font-black">AKTIF</span>}
                 </div>
                 <span className="text-[10px] text-slate-300 mt-1 leading-tight">
-                  Soal tingkat menengah, pemahaman tajwid & potongan ayat.
+                  Menguji pemahaman konsep, hukum kaidah, dan korelasi antar komponen materi.
                 </span>
               </button>
 
@@ -2290,11 +2430,11 @@ export const AiGameGeneratorView: React.FC<AiGameGeneratorViewProps> = ({
                 }`}
               >
                 <div className="flex items-center justify-between font-bold text-xs">
-                  <span>🔴 Sulit</span>
+                  <span>🔴 Sulit (HOTS)</span>
                   {difficulty === 'Sulit' && <span className="text-[10px] bg-rose-500 text-white px-1.5 py-0.2 rounded font-black">AKTIF</span>}
                 </div>
                 <span className="text-[10px] text-slate-300 mt-1 leading-tight">
-                  Soal hafalan mendalam, tajwid kompleks & kemiripan lafaz.
+                  Soal penalaran analitis (HOTS), evaluasi kasus kritis, dan studi pemecahan masalah.
                 </span>
               </button>
             </div>
@@ -2312,10 +2452,19 @@ export const AiGameGeneratorView: React.FC<AiGameGeneratorViewProps> = ({
               type="button"
               onClick={() => handleGenerateAiGame(false)}
               disabled={isGenerating}
-              className="w-full sm:flex-1 py-3 px-4 bg-gradient-to-r from-purple-600 via-indigo-600 to-emerald-600 hover:from-purple-500 hover:to-emerald-500 text-white font-black text-xs sm:text-sm rounded-xl shadow-lg shadow-indigo-600/30 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+              className="w-full sm:flex-1 py-3 px-4 bg-gradient-to-r from-purple-600 via-indigo-600 to-emerald-600 hover:from-purple-500 hover:to-emerald-500 text-white font-black text-xs sm:text-sm rounded-xl shadow-lg shadow-indigo-600/30 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60"
             >
-              <Sparkles className="w-4 h-4 text-amber-300 animate-spin" />
-              <span>{isGenerating ? 'Sedang Diproses...' : `🤖 AI Online (${menuList.find((m) => m.id === activeMode)?.label})`}</span>
+              {isGenerating ? (
+                <>
+                  <Loader2 className="w-4 h-4 text-amber-300 animate-spin" />
+                  <span>Sedang Menghasilkan Soal AI...</span>
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-4 h-4 text-amber-300" />
+                  <span>🤖 AI Online ({menuList.find((m) => m.id === activeMode)?.label})</span>
+                </>
+              )}
             </button>
 
             <button
