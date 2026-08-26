@@ -2,6 +2,7 @@ export interface NormalizedQuestion {
   id: string;
   questionNumber: number;
   questionText: string;
+  gambarUrl?: string;
   arabicText?: string;
   translationText?: string;
   optionsList: { letter: string; text: string; isCorrect: boolean }[];
@@ -167,10 +168,15 @@ export function normalizeQuestion(
     ? rawExplanation.trim()
     : 'Pembahasan ringkas belum tersedia untuk soal ini.';
 
+  // 6. Resolve Image URL
+  const rawGambar = q.gambarUrl || q.imageUrl || q.gambar_url || q.image_url || q.gambar || q.foto || undefined;
+  const gambarUrl = typeof rawGambar === 'string' && rawGambar.trim() ? rawGambar.trim() : undefined;
+
   return {
     id,
     questionNumber,
     questionText,
+    gambarUrl,
     arabicText,
     translationText,
     optionsList,

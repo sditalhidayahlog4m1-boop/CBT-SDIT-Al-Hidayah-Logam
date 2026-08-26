@@ -21,6 +21,8 @@ import {
   ChevronLeft,
   ChevronRight,
   User as UserIcon,
+  RefreshCw,
+  Activity,
 } from 'lucide-react';
 import {
   BarChart,
@@ -463,8 +465,18 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </div>
             </div>
 
-            {/* Quick Export Button */}
+            {/* Actions Bar */}
             <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  window.location.reload();
+                }}
+                className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-200 text-xs font-bold rounded-xl border border-slate-700 flex items-center gap-2 transition-all cursor-pointer shadow-sm"
+                title="Muat ulang dan perbarui status login terkini"
+              >
+                <RefreshCw className="w-3.5 h-3.5 text-blue-400" />
+                <span className="hidden sm:inline">Segarkan Data</span>
+              </button>
               <button
                 onClick={handleExportCSV}
                 className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl border border-slate-700 flex items-center gap-2 transition-all cursor-pointer shadow-sm"

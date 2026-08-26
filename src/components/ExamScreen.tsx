@@ -307,10 +307,21 @@ export const ExamScreen: React.FC<ExamScreenProps> = ({
             const normQ = normalizeQuestion(currentQuestion, currentIndex, bank.title || bank.subject);
             return (
               <>
-                <div className="p-6 bg-[#0f172a] rounded-2xl border border-slate-800 shadow-sm space-y-3">
+                <div className="p-6 bg-[#0f172a] rounded-2xl border border-slate-800 shadow-sm space-y-4">
                   <p className="text-base font-bold text-slate-100 leading-relaxed">
                     {normQ.questionText}
                   </p>
+
+                  {/* Gambar Lampiran Soal */}
+                  {normQ.gambarUrl && (
+                    <div className="flex justify-center p-2.5 bg-slate-950/70 rounded-xl border border-slate-800">
+                      <img
+                        src={normQ.gambarUrl}
+                        alt={`Gambar Soal Nomor ${currentIndex + 1}`}
+                        className="max-h-72 sm:max-h-80 w-auto rounded-lg border border-slate-700/60 shadow-md object-contain bg-slate-900"
+                      />
+                    </div>
+                  )}
                 </div>
 
                 {/* Options List */}

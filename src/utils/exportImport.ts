@@ -1,6 +1,7 @@
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
-import { QuestionBank, QuestionOption, Teacher, Student, ExamResult } from '../types';
+import { QuestionBank, QuestionOption, Teacher, Student, ExamResult, DailyGradeRecord } from '../types';
+import { getGradePredicate, GRADE_SCALE_TABLE } from './gradeHelper';
 
 // Download Excel Template for Upload Soal
 export function downloadSoalTemplate() {
@@ -396,3 +397,263 @@ export function exportAnswerKeysPDF(banks: QuestionBank[]) {
 
   doc.save('Kumpulan_Kunci_Jawaban_CBT.pdf');
 }
+
+// Download Excel Template for Nilai Harian
+export function downloadNilaiHarianTemplate(
+  students: Student[] = [],
+  defaultSubject: string = 'Al-Qur\'an Hadits',
+  defaultClass: string = 'Kelas 1'
+) {
+  const sampleDate = '26/08/2026';
+  
+  let rows: any[] = [];
+  const activeStudents = students.filter(
+    (s) => (defaultClass === 'Semua' || !defaultClass || s.classRoom === defaultClass) && s.activeStatus !== 'Non-Aktif'
+  );
+
+  if (activeStudents.length > 0) {
+    rows = activeStudents.map((s, idx) => ({
+      'NO': idx + 1,
+      'NIS': s.nis || '',
+      'NISN': s.nisn || '',
+      'NAMA SISWA': s.name || '',
+      'KELAS': s.classRoom || defaultClass || 'Kelas 1',
+      'MATA PELAJARAN': defaultSubject || 'Al-Qur\'an Hadits',
+      'TANGGAL PENILAIAN (DD/MM/YYYY)': sampleDate,
+      'JENIS / MATERI PENILAIAN': 'Penilaian Harian 1 (PH-1)',
+      'NILAI (0-100)': idx === 0 ? 95 : idx === 1 ? 88 : idx === 2 ? 78 : 85,
+      'CATATAN': 'Tuntaskan bacaan & tajwid',
+    }));
+  } else {
+    // Sample rows
+    rows = [
+      {
+        'NO': 1,
+        'NIS': '1001',
+        'NISN': '0081234567',
+        'NAMA SISWA': 'Ahmad Fauzan',
+        'KELAS': defaultClass || 'Kelas 1',
+        'MATA PELAJARAN': defaultSubject || 'Al-Qur\'an Hadits',
+        'TANGGAL PENILAIAN (DD/MM/YYYY)': sampleDate,
+        'JENIS / MATERI PENILAIAN': 'Penilaian Harian 1 (PH-1)',
+        'NILAI (0-100)': 95,
+        'CATATAN': 'Sangat lancar dan tertib',
+      },
+      {
+        'NO': 2,
+        'NIS': '1002',
+        'NISN': '0081234568',
+        'NAMA SISWA': 'Siti Aisyah Putri',
+        'KELAS': defaultClass || 'Kelas 1',
+        'MATA PELAJARAN': defaultSubject || 'Al-Qur\'an Hadits',
+        'TANGGAL PENILAIAN (DD/MM/YYYY)': sampleDate,
+        'JENIS / MATERI PENILAIAN': 'Penilaian Harian 1 (PH-1)',
+        'NILAI (0-100)': 88,
+        'CATATAN': 'Makharijul huruf baik',
+      },
+      {
+        'NO': 3,
+        'NIS': '1003',
+        'NISN': '0081234569',
+        'NAMA SISWA': 'Muhammad Rizky Pratama',
+        'KELAS': defaultClass || 'Kelas 1',
+        'MATA PELAJARAN': defaultSubject || 'Al-Qur\'an Hadits',
+        'TANGGAL PENILAIAN (DD/MM/YYYY)': sampleDate,
+        'JENIS / MATERI PENILAIAN': 'Penilaian Harian 1 (PH-1)',
+        'NILAI (0-100)': 76,
+        'CATATAN': 'Perlu latihan hukum mad',
+      },
+    ];
+  }
+
+  const wb = XLSX.utils.book_new();
+
+  // Sheet 1: Template Input Nilai
+  const ws = XLSX.utils.json_to_sheet(rows);
+  ws['!cols'] = [
+    { wch: 6 },  // NO
+    { wch: 12 }, // NIS
+    { wch: 16 }, // NISN
+    { wch: 30 }, // NAMA SISWA
+    { wch: 16 }, // KELAS
+    { wch: 28 }, // MATA PELAJARAN
+    { wch: 32 }, // TANGGAL PENILAIAN
+    { wch: 32 }, // JENIS / MATERI PENILAIAN
+    { wch: 16 }, // NILAI (0-100)
+    { wch: 32 }, // CATATAN
+  ];
+  XLSX.utils.book_append_sheet(wb, ws, 'Template Nilai Harian');
+
+  // Sheet 2: Petunjuk Rentang Nilai (Sesuai Standar SDIT)
+  const petunjukData = GRADE_SCALE_TABLE.map((item) => ({
+    'RENTANG NILAI': item.range,
+    'PREDIKAT (LATIN)': item.latin,
+    'PREDIKAT (ARAB)': item.arabic,
+    'KETERANGAN': item.description,
+  }));
+  const wsPetunjuk = XLSX.utils.json_to_sheet(petunjukData);
+  wsPetunjuk['!cols'] = [
+    { wch: 18 },
+    { wch: 20 },
+    { wch: 18 },
+    { wch: 25 },
+  ];
+  XLSX.utils.book_append_sheet(wb, wsPetunjuk, 'Rentang Penilaian');
+
+  const fileName = `Template_Nilai_Harian_${(defaultSubject || 'Mapel').replace(/[^a-zA-Z0-9]/g, '_')}_${(defaultClass || 'Semua').replace(/[^a-zA-Z0-9]/g, '_')}.xlsx`;
+  XLSX.writeFile(wb, fileName);
+}
+
+// Export Rekap Nilai Harian to Excel with Calculations and Predicates
+export function exportNilaiHarianToExcel(
+  records: DailyGradeRecord[],
+  subjectName: string = 'Semua Mapel',
+  classRoom: string = 'Semua Kelas',
+  schoolName: string = 'SDIT Al Hidayah Logam'
+) {
+  const wb = XLSX.utils.book_new();
+
+  const formattedRows = records.map((r, idx) => {
+    const pred = getGradePredicate(r.score);
+    return {
+      'NO': idx + 1,
+      'NIS': r.nis || '-',
+      'NISN': r.nisn || '-',
+      'NAMA SISWA': r.studentName,
+      'KELAS': r.classRoom,
+      'MATA PELAJARAN': r.subjectName,
+      'TANGGAL PENILAIAN': r.date,
+      'JENIS / MATERI': r.taskTitle,
+      'NILAI': r.score,
+      'PREDIKAT': pred.fullPredicate,
+      'KETERANGAN': pred.description,
+      'CATATAN': r.notes || '-',
+    };
+  });
+
+  const ws = XLSX.utils.json_to_sheet(formattedRows);
+  ws['!cols'] = [
+    { wch: 6 },
+    { wch: 12 },
+    { wch: 16 },
+    { wch: 30 },
+    { wch: 15 },
+    { wch: 28 },
+    { wch: 20 },
+    { wch: 30 },
+    { wch: 10 },
+    { wch: 24 },
+    { wch: 22 },
+    { wch: 25 },
+  ];
+
+  XLSX.utils.book_append_sheet(wb, ws, 'Rekap Nilai Harian');
+
+  // Also include Scale Reference Sheet
+  const petunjukData = GRADE_SCALE_TABLE.map((item) => ({
+    'RENTANG NILAI': item.range,
+    'PREDIKAT': item.fullPredicate,
+    'KETERANGAN': item.description,
+  }));
+  const wsPetunjuk = XLSX.utils.json_to_sheet(petunjukData);
+  XLSX.utils.book_append_sheet(wb, wsPetunjuk, 'Rentang Penilaian');
+
+  const fileName = `Rekap_Nilai_Harian_${subjectName.replace(/[^a-zA-Z0-9]/g, '_')}_${classRoom.replace(/[^a-zA-Z0-9]/g, '_')}.xlsx`;
+  XLSX.writeFile(wb, fileName);
+}
+
+// Export Rekap Nilai Harian to PDF
+export function exportNilaiHarianToPdf(
+  records: DailyGradeRecord[],
+  subjectName: string = 'Semua Mapel',
+  classRoom: string = 'Semua Kelas',
+  schoolName: string = 'SDIT Al Hidayah Logam'
+) {
+  const doc = new jsPDF('landscape');
+
+  // Header Title
+  doc.setFontSize(16);
+  doc.setFont('helvetica', 'bold');
+  doc.text(schoolName.toUpperCase(), 148, 16, { align: 'center' });
+  doc.setFontSize(12);
+  doc.text('LAPORAN REKAPITULASI PENILAIAN HARIAN SISWA', 148, 23, { align: 'center' });
+
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`Mata Pelajaran : ${subjectName}   |   Kelas : ${classRoom}   |   Total Data : ${records.length} Penilaian`, 14, 32);
+  doc.text(`Tanggal Cetak   : ${new Date().toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' })}`, 282, 32, { align: 'right' });
+
+  // Table Line
+  doc.setLineWidth(0.3);
+  doc.line(14, 35, 282, 35);
+
+  let y = 43;
+  // Header Row
+  doc.setFillColor(240, 243, 246);
+  doc.rect(14, y - 5, 268, 8, 'F');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8);
+  doc.text('NO', 16, y);
+  doc.text('NAMA SISWA', 28, y);
+  doc.text('KELAS', 85, y);
+  doc.text('MATA PELAJARAN', 110, y);
+  doc.text('TANGGAL', 160, y);
+  doc.text('MATERI / TUGAS', 185, y);
+  doc.text('NILAI', 230, y);
+  doc.text('PREDIKAT', 245, y);
+  doc.text('KETERANGAN', 270, y, { align: 'right' });
+
+  y += 6;
+  doc.setFont('helvetica', 'normal');
+
+  records.forEach((r, idx) => {
+    if (y > 185) {
+      doc.addPage('landscape');
+      y = 20;
+      doc.setFillColor(240, 243, 246);
+      doc.rect(14, y - 5, 268, 8, 'F');
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8);
+      doc.text('NO', 16, y);
+      doc.text('NAMA SISWA', 28, y);
+      doc.text('KELAS', 85, y);
+      doc.text('MATA PELAJARAN', 110, y);
+      doc.text('TANGGAL', 160, y);
+      doc.text('MATERI / TUGAS', 185, y);
+      doc.text('NILAI', 230, y);
+      doc.text('PREDIKAT', 245, y);
+      doc.text('KETERANGAN', 270, y, { align: 'right' });
+      y += 6;
+      doc.setFont('helvetica', 'normal');
+    }
+
+    const pred = getGradePredicate(r.score);
+    doc.text(String(idx + 1), 16, y);
+    doc.text(r.studentName.slice(0, 28), 28, y);
+    doc.text(r.classRoom || '-', 85, y);
+    doc.text(r.subjectName.slice(0, 24), 110, y);
+    doc.text(r.date || '-', 160, y);
+    doc.text(r.taskTitle.slice(0, 22), 185, y);
+    doc.text(String(r.score), 230, y);
+    doc.text(pred.latin, 245, y);
+    doc.text(pred.description, 270, y, { align: 'right' });
+
+    y += 5.5;
+  });
+
+  // Calculate Average
+  if (records.length > 0) {
+    const totalScore = records.reduce((acc, r) => acc + r.score, 0);
+    const avg = Math.round((totalScore / records.length) * 10) / 10;
+    const avgPred = getGradePredicate(avg);
+
+    y += 4;
+    doc.setLineWidth(0.2);
+    doc.line(14, y - 2, 282, y - 2);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`RATA-RATA KESELURUHAN: ${avg}  |  Predikat: ${avgPred.fullPredicate} (${avgPred.description})`, 14, y + 3);
+  }
+
+  doc.save(`Rekap_Nilai_Harian_${subjectName}_${classRoom}.pdf`);
+}
+

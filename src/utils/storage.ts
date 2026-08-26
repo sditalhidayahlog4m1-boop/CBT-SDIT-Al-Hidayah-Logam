@@ -1,4 +1,4 @@
-import { Teacher, Student, Subject, QuestionBank, ExamResult, AuthUser, RolePermissions, GameHistoryLog, UserLoginLog } from '../types';
+import { Teacher, Student, Subject, QuestionBank, ExamResult, AuthUser, RolePermissions, GameHistoryLog, UserLoginLog, DailyGradeRecord } from '../types';
 
 export function getStoredCurrentUser(): AuthUser | null {
   try {
@@ -149,6 +149,22 @@ export function saveStoredResults(results: ExamResult[]) {
   localStorage.setItem('cbt_results', JSON.stringify(results));
 }
 
+export function getStoredDailyGrades(): DailyGradeRecord[] {
+  try {
+    const data = localStorage.getItem('cbt_daily_grades');
+    if (!data) return [];
+    const parsed = JSON.parse(data);
+    if (Array.isArray(parsed)) return parsed;
+    return [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveStoredDailyGrades(grades: DailyGradeRecord[]) {
+  localStorage.setItem('cbt_daily_grades', JSON.stringify(grades));
+}
+
 export interface SchoolProfile {
   name: string;
   logoUrl?: string;
@@ -228,6 +244,7 @@ export const DEFAULT_ROLE_PERMISSIONS: RolePermissions = {
     'data-guru',
     'data-siswa',
     'mata-pelajaran',
+    'nilai-harian',
     'pembuat-soal-ai',
     'ai-pembuat-game',
     'riwayat-game',
@@ -240,6 +257,7 @@ export const DEFAULT_ROLE_PERMISSIONS: RolePermissions = {
   ],
   siswa: [
     'profil-saya',
+    'nilai-harian',
     'ai-pembuat-game',
     'bank-soal',
     'mulai-ujian',
@@ -331,6 +349,7 @@ export function clearAllStoredData() {
   localStorage.setItem('cbt_banks', JSON.stringify([]));
   localStorage.setItem('cbt_results', JSON.stringify([]));
   localStorage.setItem('cbt_game_logs', JSON.stringify([]));
+  localStorage.setItem('cbt_daily_grades', JSON.stringify([]));
   localStorage.removeItem('cbt_game_data');
   localStorage.setItem('cbt_role_permissions', JSON.stringify(DEFAULT_ROLE_PERMISSIONS));
 }

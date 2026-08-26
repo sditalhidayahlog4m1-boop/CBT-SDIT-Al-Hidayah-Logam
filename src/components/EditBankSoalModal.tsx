@@ -15,6 +15,9 @@ import {
   FileEdit,
   AlertCircle,
   Check,
+  Image as ImageIcon,
+  Upload,
+  Eye,
 } from 'lucide-react';
 import { QuestionBank, Question, QuestionOption } from '../types';
 import { normalizeQuestion } from '../utils/normalizeQuestion';
@@ -97,6 +100,7 @@ export const EditBankSoalModal: React.FC<EditBankSoalModalProps> = ({
           question_text: norm.questionText,
           options: options,
           explanation: norm.explanationText || '',
+          gambarUrl: norm.gambarUrl || undefined,
         };
       });
 
@@ -108,6 +112,43 @@ export const EditBankSoalModal: React.FC<EditBankSoalModalProps> = ({
       );
     }
   }, [bank, initialQuestionIndex]);
+
+  // Handle Upload Image for Question
+  const handleUploadGambarSoal = (index: number, event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      setErrorMessage('File harus berupa format gambar (JPG, PNG, GIF, WEBP, SVG)!');
+      return;
+    }
+
+    if (file.size > 2 * 1024 * 1024) {
+      setErrorMessage('Ukuran gambar maksimal adalah 2 MB!');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const base64String = reader.result as string;
+      setQuestions((prev) =>
+        prev.map((q, idx) => (idx === index ? { ...q, gambarUrl: base64String } : q))
+      );
+      setErrorMessage('');
+    };
+    reader.onerror = () => {
+      setErrorMessage('Gagal membaca file gambar. Silakan coba file lain.');
+    };
+    reader.readAsDataURL(file);
+    event.target.value = '';
+  };
+
+  // Handle Remove Image for Question
+  const handleHapusGambarSoal = (index: number) => {
+    setQuestions((prev) =>
+      prev.map((q, idx) => (idx === index ? { ...q, gambarUrl: undefined } : q))
+    );
+  };
 
   // Handle Question Text Change
   const handleQuestionTextChange = (text: string) => {
@@ -524,7 +565,12 @@ export const EditBankSoalModal: React.FC<EditBankSoalModalProps> = ({
                             : 'bg-slate-800/80 border-slate-700 text-slate-300 hover:bg-slate-700'
                         }`}
                       >
-                        <span>#{idx + 1}</span>
+                        <div className="flex items-center gap-1">
+                          <span>#{idx + 1}</span>
+                          {q.gambarUrl && (
+                            <ImageIcon className={`w-3 h-3 ${isCurrent ? 'text-amber-300' : 'text-blue-400'}`} title="Memiliki lampiran gambar" />
+                          )}
+                        </div>
                         <span
                           className={`text-[9px] px-1 rounded-sm mt-0.5 ${
                             isCurrent
@@ -576,6 +622,53 @@ export const EditBankSoalModal: React.FC<EditBankSoalModalProps> = ({
                       placeholder="Ketik teks soal atau pertanyaan lengkap di sini..."
                       className="w-full p-3.5 bg-slate-800 border border-slate-700 rounded-xl font-medium text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 leading-relaxed text-sm"
                     />
+
+                    {/* Tombol Upload & Kelola Gambar Soal */}
+                    <div className="pt-2">
+                      <div className="flex flex-wrap items-center gap-2.5">
+                        <label className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-blue-500/15 hover:bg-blue-500/25 text-blue-300 border border-blue-500/30 rounded-xl cursor-pointer transition-all shadow-xs">
+                          <ImageIcon className="w-3.5 h-3.5 text-blue-400" />
+                          <span>{currentQ.gambarUrl ? 'Ganti Gambar Soal' : 'Unggah Gambar Soal'}</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={(e) => handleUploadGambarSoal(activeQIndex, e)}
+                          />
+                        </label>
+
+                        {currentQ.gambarUrl && (
+                          <button
+                            type="button"
+                            onClick={() => handleHapusGambarSoal(activeQIndex)}
+                            className="px-3 py-1.5 text-xs font-bold bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 rounded-xl flex items-center gap-1.5 transition-all cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                            <span>Hapus Gambar</span>
+                          </button>
+                        )}
+
+                        <span className="text-[11px] text-slate-400">
+                          Mendukung grafik, peta, diagram, tabel, huruf Arab/Hijaiyyah (Maks. 2MB)
+                        </span>
+                      </div>
+
+                      {/* Pratinjau Gambar Soal */}
+                      {currentQ.gambarUrl && (
+                        <div className="mt-3 p-2 bg-slate-950/80 rounded-xl border border-slate-800 inline-block max-w-md">
+                          <div className="flex items-center justify-between gap-2 pb-1.5 mb-1.5 border-b border-slate-800 text-[11px] text-slate-400 font-medium">
+                            <span className="flex items-center gap-1 text-blue-400">
+                              <ImageIcon className="w-3 h-3" /> Pratinjau Gambar Lampiran:
+                            </span>
+                          </div>
+                          <img
+                            src={currentQ.gambarUrl}
+                            alt="Lampiran Soal"
+                            className="rounded-lg border border-slate-700/60 max-h-48 w-auto object-contain bg-slate-900 mx-auto"
+                          />
+                        </div>
+                      )}
+                    </div>
                   </div>
 
                   {/* 2. PILIHAN GANDA (OPTIONS A, B, C, D, E) */}

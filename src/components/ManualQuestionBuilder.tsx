@@ -19,6 +19,7 @@ import {
   ClipboardList,
   Pin,
   Rocket,
+  Image as ImageIcon,
 } from 'lucide-react';
 import { QuestionBank, AuthUser, Teacher, Subject, Student, Question, QuestionOption } from '../types';
 import {
@@ -34,6 +35,7 @@ export interface QuestionManualItem {
   options: string[];
   answer: string; // The correct option text or letter
   explanation?: string;
+  gambarUrl?: string;
 }
 
 // Utility function to parse raw pasted text (Word/Text document)
@@ -312,6 +314,42 @@ export const ManualQuestionBuilder: React.FC<ManualQuestionBuilderProps> = ({
     setQuestions(updated);
   };
 
+  // Upload image for manual question
+  const handleUploadGambarManual = (qIndex: number, e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      setErrorMessage('File harus berupa format gambar (JPG, PNG, GIF, WEBP, SVG)!');
+      return;
+    }
+
+    if (file.size > 2 * 1024 * 1024) {
+      setErrorMessage('Ukuran gambar maksimal adalah 2 MB!');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const base64String = reader.result as string;
+      const updated = [...questions];
+      updated[qIndex].gambarUrl = base64String;
+      setQuestions(updated);
+      setErrorMessage('');
+    };
+    reader.onerror = () => {
+      setErrorMessage('Gagal membaca file gambar. Silakan coba file lain.');
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  const handleHapusGambarManual = (qIndex: number) => {
+    const updated = [...questions];
+    updated[qIndex].gambarUrl = undefined;
+    setQuestions(updated);
+  };
+
   // Submit manual questions
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -361,6 +399,7 @@ export const ManualQuestionBuilder: React.FC<ManualQuestionBuilderProps> = ({
         question_text: q.question.trim(),
         options: optionsList,
         explanation: q.explanation?.trim() || '',
+        gambarUrl: q.gambarUrl,
       };
     });
 
@@ -709,6 +748,46 @@ export const ManualQuestionBuilder: React.FC<ManualQuestionBuilderProps> = ({
                   className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-700/80 rounded-xl text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 font-medium leading-relaxed"
                   required
                 />
+
+                {/* Upload Gambar Soal */}
+                <div className="mt-2 flex flex-wrap items-center gap-2.5">
+                  <label className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-blue-500/15 hover:bg-blue-500/25 text-blue-300 border border-blue-500/30 rounded-xl cursor-pointer transition-all shadow-xs">
+                    <ImageIcon className="w-3.5 h-3.5 text-blue-400" />
+                    <span>{q.gambarUrl ? 'Ganti Gambar Soal' : 'Unggah Gambar Soal'}</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => handleUploadGambarManual(qIndex, e)}
+                    />
+                  </label>
+
+                  {q.gambarUrl && (
+                    <button
+                      type="button"
+                      onClick={() => handleHapusGambarManual(qIndex)}
+                      className="px-3 py-1.5 text-xs font-bold bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 rounded-xl flex items-center gap-1.5 transition-all cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                      <span>Hapus Gambar</span>
+                    </button>
+                  )}
+
+                  <span className="text-[11px] text-slate-400">
+                    Maks. 2MB (Diagram, Peta, Rumus, Gambar)
+                  </span>
+                </div>
+
+                {/* Preview Gambar Soal */}
+                {q.gambarUrl && (
+                  <div className="mt-2.5 p-2 bg-slate-950/80 rounded-xl border border-slate-800 inline-block max-w-sm">
+                    <img
+                      src={q.gambarUrl}
+                      alt={`Lampiran Soal ${qIndex + 1}`}
+                      className="rounded-lg border border-slate-700 max-h-40 w-auto object-contain bg-slate-900 mx-auto"
+                    />
+                  </div>
+                )}
               </div>
 
               {/* Options Fields A, B, C, D */}

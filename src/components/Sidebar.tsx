@@ -24,6 +24,7 @@ import {
   ShieldCheck,
   User,
   Trophy,
+  Award,
 } from 'lucide-react';
 import { ActiveTab, AuthUser, RolePermissions } from '../types';
 import { SchoolProfile } from '../utils/storage';
@@ -60,6 +61,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'data-guru', label: 'Data Guru', icon: Users },
     { id: 'data-siswa', label: 'Data Siswa', icon: GraduationCap },
     { id: 'mata-pelajaran', label: 'Mata Pelajaran', icon: BookOpen },
+    { id: 'nilai-harian', label: 'Nilai Harian', icon: Award },
     { id: 'ai-pembuat-game', label: 'Game Soal', icon: Gamepad2, highlightGame: true },
     { id: 'riwayat-game', label: 'Rekap Game Siswa', icon: Trophy },
     { id: 'pembuat-soal-ai', label: 'Pembuat Soal', icon: Sparkles, highlight: true },

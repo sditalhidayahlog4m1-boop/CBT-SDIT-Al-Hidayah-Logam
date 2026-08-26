@@ -26,6 +26,7 @@ import {
   Info,
   Globe,
   User,
+  Award,
 } from 'lucide-react';
 import { ActiveTab, AuthUser, RolePermissions } from '../types';
 
@@ -88,6 +89,15 @@ const MENU_LIST: MenuDefinition[] = [
     category: 'Master Data Pokok',
     description: 'Pengaturan mata pelajaran, kode mapel, dan tingkatan kelas',
     icon: BookOpen,
+  },
+  {
+    id: 'nilai-harian',
+    label: 'Nilai Harian Siswa & Rekapitulasi',
+    category: 'Master Data Pokok',
+    description: 'Pencatatan nilai harian siswa dilengkapi tanggal, perhitungan rata-rata, predikat, dan ekspor-impor Excel',
+    icon: Award,
+    badge: 'Penilaian',
+    badgeColor: 'bg-indigo-500/30 text-indigo-200 border-indigo-500/40',
   },
   {
     id: 'ai-pembuat-game',

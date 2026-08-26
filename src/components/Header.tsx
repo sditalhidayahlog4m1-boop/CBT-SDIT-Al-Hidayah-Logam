@@ -38,6 +38,10 @@ const TAB_TITLES: Record<ActiveTab, { title: string; subtitle: string }> = {
     title: 'Kelola Mata Pelajaran',
     subtitle: 'Daftar mata pelajaran dan kurikulum jenjang pendidikan',
   },
+  'nilai-harian': {
+    title: 'Nilai Harian Siswa',
+    subtitle: 'Pencatatan nilai harian siswa dilengkapi tanggal, perhitungan otomatis & predikat SDIT',
+  },
   'pembuat-soal-ai': {
     title: 'Pembuat Soal AI (Gemini)',
     subtitle: 'Generate soal CBT otomatis berstandar HOTS/Vokasional dengan Gemini AI',

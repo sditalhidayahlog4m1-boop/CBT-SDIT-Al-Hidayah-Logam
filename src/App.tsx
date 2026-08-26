@@ -10,6 +10,7 @@ import {
   ActiveTab,
   AuthUser,
   RolePermissions,
+  DailyGradeRecord,
 } from './types';
 import {
   getStoredTeachers,
@@ -26,6 +27,8 @@ import {
   saveStoredGameLogs,
   getStoredLoginLogs,
   saveStoredLoginLogs,
+  getStoredDailyGrades,
+  saveStoredDailyGrades,
   clearAllStoredData,
   getStoredCurrentUser,
   saveStoredCurrentUser,
@@ -50,6 +53,7 @@ import { ProfilSekolahView } from './components/ProfilSekolahView';
 import { TeacherDataView } from './components/TeacherDataView';
 import { StudentDataView } from './components/StudentDataView';
 import { SubjectView } from './components/SubjectView';
+import { NilaiHarianView } from './components/NilaiHarianView';
 import { AiQuestionGeneratorView } from './components/AiQuestionGeneratorView';
 import { AiGameGeneratorView } from './components/AiGameGeneratorView';
 import { EkstrakDokumenView } from './components/EkstrakDokumenView';
@@ -99,6 +103,7 @@ export default function App() {
   const [results, setResults] = useState<ExamResult[]>(getStoredResults);
   const [gameLogs, setGameLogs] = useState<GameHistoryLog[]>(getStoredGameLogs);
   const [loginLogs, setLoginLogs] = useState<UserLoginLog[]>(getStoredLoginLogs);
+  const [dailyGrades, setDailyGrades] = useState<DailyGradeRecord[]>(getStoredDailyGrades);
   const [gameData, setGameData] = useState<Record<string, any>>(getStoredGameData);
 
   // Active Exam Focus Mode state
@@ -127,6 +132,8 @@ export default function App() {
   gameLogsRef.current = gameLogs;
   const loginLogsRef = useRef(loginLogs);
   loginLogsRef.current = loginLogs;
+  const dailyGradesRef = useRef(dailyGrades);
+  dailyGradesRef.current = dailyGrades;
   const schoolProfileRef = useRef(schoolProfile);
   schoolProfileRef.current = schoolProfile;
   const rolePermissionsRef = useRef(rolePermissions);
@@ -229,6 +236,11 @@ export default function App() {
       saveStoredLoginLogs(data.loginLogs);
       lastSyncedDataRef.current.loginLogs = data.loginLogs;
     }
+    if (Array.isArray(data.dailyGrades) && !isDeepEqual(dailyGradesRef.current, data.dailyGrades)) {
+      setDailyGrades(data.dailyGrades);
+      saveStoredDailyGrades(data.dailyGrades);
+      lastSyncedDataRef.current.dailyGrades = data.dailyGrades;
+    }
     if (data.schoolProfile && !isDeepEqual(schoolProfileRef.current, data.schoolProfile)) {
       setSchoolProfile(data.schoolProfile);
       saveStoredSchoolProfile(data.schoolProfile);
@@ -292,6 +304,7 @@ export default function App() {
             results: resultsRef.current,
             gameLogs: gameLogsRef.current,
             loginLogs: loginLogsRef.current,
+            dailyGrades: dailyGradesRef.current,
             schoolProfile: schoolProfileRef.current,
             rolePermissions: rolePermissionsRef.current,
             gameData: gameDataRef.current,
@@ -311,11 +324,79 @@ export default function App() {
 
     performSync();
 
+    // Auto-refresh interval (polling fallback every 15s to keep monitoring perfectly updated)
+    const pollInterval = setInterval(async () => {
+      try {
+        const freshData = await fetchAppDataFromFirestore(true);
+        if (freshData) {
+          applyRemoteData(freshData, false);
+        }
+      } catch (err) {
+        // silent
+      }
+    }, 15000);
+
     return () => {
+      clearInterval(pollInterval);
       if (unsubscribeFirestore) unsubscribeFirestore();
       if (unsubscribeLocal) unsubscribeLocal();
     };
   }, []);
+
+  // Heartbeat Mechanism: Periodic active status ping for logged-in user (Guru, Siswa, Admin)
+  useEffect(() => {
+    if (!currentUser) return;
+
+    const pingHeartbeat = () => {
+      const now = new Date();
+      const formattedTime = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+
+      let identifier = currentUser.username || '';
+      let classRoom: string | undefined = undefined;
+      let positionOrSubject: string | undefined = undefined;
+
+      if (currentUser.role === 'siswa' && currentUser.details && 'nisn' in currentUser.details) {
+        identifier = currentUser.details.nisn || currentUser.details.nis || currentUser.username || '';
+        classRoom = currentUser.details.classRoom;
+      } else if (currentUser.role === 'guru' && currentUser.details && 'nip' in currentUser.details) {
+        identifier = currentUser.details.nip || currentUser.details.nuptk || currentUser.username || '';
+        positionOrSubject = `${currentUser.details.position || 'Guru'}${currentUser.details.subject ? ` (${currentUser.details.subject})` : ''}`;
+      } else if (currentUser.role === 'admin') {
+        positionOrSubject = 'Administrator Sistem';
+      }
+
+      const updatedLog: UserLoginLog = {
+        id: `login-${currentUser.role}-${currentUser.name.replace(/\s+/g, '-').toLowerCase()}`,
+        userId: currentUser.details?.id || currentUser.username || currentUser.name,
+        name: currentUser.name,
+        role: currentUser.role,
+        identifier: identifier || currentUser.username || '-',
+        classRoom,
+        positionOrSubject,
+        loginTime: formattedTime,
+        lastSeenTime: formattedTime,
+        photoUrl: currentUser.photoUrl,
+      };
+
+      setLoginLogs((prev) => {
+        const filtered = prev.filter(
+          (l) => !(l.name.toLowerCase() === currentUser.name.toLowerCase() && l.role === currentUser.role)
+        );
+        const nextLogs = [updatedLog, ...filtered];
+        saveStoredLoginLogs(nextLogs);
+        return nextLogs;
+      });
+
+      trackUserLoginInFirestore(updatedLog);
+    };
+
+    // Initial heartbeat on mount
+    pingHeartbeat();
+
+    // Heartbeat every 45 seconds while session is active
+    const heartbeatTimer = setInterval(pingHeartbeat, 45000);
+    return () => clearInterval(heartbeatTimer);
+  }, [currentUser]);
 
   // Synchronize Favicon and Document Title with School Profile & Custom Logo
   useEffect(() => {
@@ -437,6 +518,14 @@ export default function App() {
   useEffect(() => {
     saveStoredLoginLogs(loginLogs);
   }, [loginLogs]);
+
+  useEffect(() => {
+    saveStoredDailyGrades(dailyGrades);
+    if (hasFinishedInitialSyncRef.current) {
+      broadcastAppDataChange({ dailyGrades });
+      saveAppDataToFirestore({ dailyGrades });
+    }
+  }, [dailyGrades]);
 
   useEffect(() => {
     saveStoredRolePermissions(rolePermissions);
@@ -573,6 +662,7 @@ export default function App() {
     setResults([]);
     setGameLogs([]);
     setLoginLogs([]);
+    setDailyGrades([]);
     setGameData({});
     await resetAllDataInFirestore();
   };
@@ -669,6 +759,17 @@ export default function App() {
 
           {activeTab === 'mata-pelajaran' && (
             <SubjectView subjects={subjects} setSubjects={setSubjects} />
+          )}
+
+          {activeTab === 'nilai-harian' && (
+            <NilaiHarianView
+              students={students}
+              subjects={subjects}
+              dailyGrades={dailyGrades}
+              setDailyGrades={setDailyGrades}
+              currentUser={currentUser}
+              schoolName={schoolProfile?.name}
+            />
           )}
 
           {activeTab === 'pembuat-soal-ai' && (

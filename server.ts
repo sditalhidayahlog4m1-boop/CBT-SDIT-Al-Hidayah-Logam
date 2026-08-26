@@ -690,50 +690,6 @@ async function startServer() {
       items: items,
     };
   }
-        items.push({
-          id: itemId,
-          category: gameType,
-          subject_name: mapelName,
-          difficulty: difficulty,
-          prompt_text: isIslamic ? `قُلْ أَعُوذُ بِرَبِّ الْفَلَقِ` : `Konsep: ${topic} #${num}`,
-          translation: isIslamic ? `Aku berlindung kepada Tuhan yang menguasai subuh` : `Definisi & kaidah utama ${topic} #${num}`,
-          options: ["Opsi A", "Opsi B", "Opsi C", "Opsi D"],
-          correct_answer: isIslamic ? `Aku berlindung kepada Tuhan yang menguasai subuh` : `Definisi & kaidah utama ${topic} #${num}`,
-          explanation: `Pasangan kartu cocok untuk materi "${topic}".`,
-        });
-      } else {
-        // Pilihan Ganda & Ular Tangga
-        const prompt = isIslamic
-          ? `Soal #${num}: Mengenai materi "${topic}" pada mata pelajaran ${mapelName} (${gradeLevel}), manakah pernyataan yang paling tepat dan benar?`
-          : `Soal #${num}: Dalam pembelajaran materi "${topic}" pada mata pelajaran ${mapelName} (${gradeLevel}), pernyataan manakah yang merupakan konsep utama yang benar?`;
-        const correct = `Pemahaman dan penerapan prinsip pokok materi ${topic} secara tepat dan benar`;
-        const distractors = [
-          `Pernyataan yang keliru dan bertentangan dengan kaidah materi ${topic}`,
-          `Pernyataan umum yang tidak memiliki hubungan langsung dengan ${topic}`,
-          `Kesimpulan tergesa-gesa yang menyimpang dari pembahasan ${topic}`,
-        ];
-        const allOpts = [correct, ...distractors].sort(() => Math.random() - 0.5);
-
-        items.push({
-          id: itemId,
-          category: gameType,
-          subject_name: mapelName,
-          difficulty: difficulty,
-          prompt_text: prompt,
-          options: allOpts,
-          correct_answer: correct,
-          explanation: `Jawaban benar: Memahami dan menerapkan materi ${topic} secara tepat adalah tujuan pembelajaran kurikulum ${mapelName}.`,
-        });
-      }
-    }
-
-    return {
-      game_title: `Game ${mapelName} - ${topic}`,
-      game_type: gameType,
-      subject_name: mapelName,
-      items: items,
-    };
-  }
 
   // API Endpoint for generating CBT questions using Gemini AI
   app.post("/api/generate-questions", async (req, res) => {

@@ -18,6 +18,7 @@ import {
   GameHistoryLog,
   UserLoginLog,
   RolePermissions,
+  DailyGradeRecord,
 } from '../types';
 import { SchoolProfile, AdminAccount } from './storage';
 import firebaseConfigRaw from '../../firebase-applet-config.json';
@@ -30,6 +31,7 @@ export interface AppData {
   results?: ExamResult[];
   gameLogs?: GameHistoryLog[];
   loginLogs?: UserLoginLog[];
+  dailyGrades?: DailyGradeRecord[];
   schoolProfile?: SchoolProfile;
   rolePermissions?: RolePermissions;
   gameData?: Record<string, any>;

@@ -69,6 +69,7 @@ export interface Question {
   question_text: string;
   options: QuestionOption[];
   explanation: string;
+  gambarUrl?: string;
 }
 
 export interface QuestionBank {
@@ -132,6 +133,22 @@ export interface UserLoginLog {
   photoUrl?: string;
 }
 
+export interface DailyGradeRecord {
+  id: string;
+  studentId: string;
+  studentName: string;
+  nis?: string;
+  nisn?: string;
+  classRoom: string;
+  subjectName: string;
+  subjectId?: string;
+  taskTitle: string; // e.g. "Penilaian Harian 1", "Tugas Surat Al-Falaq", "Latihan Bab 1"
+  date: string; // DD/MM/YYYY
+  score: number; // 0 - 100
+  notes?: string;
+  createdAt?: string;
+}
+
 export type ActiveTab =
   | 'dashboard'
   | 'profil-saya'
@@ -139,6 +156,7 @@ export type ActiveTab =
   | 'data-guru'
   | 'data-siswa'
   | 'mata-pelajaran'
+  | 'nilai-harian'
   | 'pembuat-soal-ai'
   | 'ekstrak-dokumen'
   | 'ai-pembuat-game'

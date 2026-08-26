@@ -298,6 +298,18 @@ export const BankSoalView: React.FC<BankSoalViewProps> = ({ banks, setBanks, set
                     </div>
 
                     <p className="font-semibold text-slate-100 leading-relaxed">{norm.questionText}</p>
+
+                    {/* Gambar Soal jika ada */}
+                    {norm.gambarUrl && (
+                      <div className="py-2 flex justify-start">
+                        <img
+                          src={norm.gambarUrl}
+                          alt={`Gambar Soal ${idx + 1}`}
+                          className="rounded-xl border border-slate-700 max-h-48 object-contain bg-slate-950/60 p-1 shadow-sm"
+                        />
+                      </div>
+                    )}
+
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
                       {norm.optionsList.map((opt, i) => (
                         <div
