@@ -1,10 +1,13 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import {
-  initializeFirestore,
   getFirestore,
   doc,
   getDoc,
+  getDocs,
   setDoc,
+  deleteDoc,
+  collection,
+  writeBatch,
   onSnapshot,
   Firestore,
   Unsubscribe,
@@ -67,22 +70,89 @@ export function getFirestoreDb(): Firestore | null {
   }
 }
 
+// Master collection & document
 const MAIN_COLLECTION = 'app_data';
 const MAIN_DOCUMENT = 'main';
 
-// Fetch full app data from Firestore once
+// Dedicated subcollections to eliminate 1MB document limit and concurrent write conflicts
+export const EXAM_RESULTS_COLLECTION = 'exam_results';
+export const GAME_LOGS_COLLECTION = 'game_logs';
+export const LOGIN_LOGS_COLLECTION = 'login_logs';
+
+/**
+ * Fetch full app data from Firestore once:
+ * - Master document (teachers, students, subjects, banks, schoolProfile, permissions, etc.)
+ * - Separate collections (exam_results, game_logs, login_logs)
+ */
 export async function fetchAppDataFromFirestore(silent = true): Promise<AppData | null> {
   const db = getFirestoreDb();
   if (!db) return null;
 
   try {
-    const docRef = doc(db, MAIN_COLLECTION, MAIN_DOCUMENT);
-    const snap = await getDoc(docRef);
+    const mainDocRef = doc(db, MAIN_COLLECTION, MAIN_DOCUMENT);
+    const mainSnapPromise = getDoc(mainDocRef);
+    const resultsSnapPromise = getDocs(collection(db, EXAM_RESULTS_COLLECTION)).catch(() => null);
+    const gameLogsSnapPromise = getDocs(collection(db, GAME_LOGS_COLLECTION)).catch(() => null);
+    const loginLogsSnapPromise = getDocs(collection(db, LOGIN_LOGS_COLLECTION)).catch(() => null);
 
-    if (snap.exists()) {
-      return snap.data() as AppData;
+    const [mainSnap, resultsSnap, gameLogsSnap, loginLogsSnap] = await Promise.all([
+      mainSnapPromise,
+      resultsSnapPromise,
+      gameLogsSnapPromise,
+      loginLogsSnapPromise,
+    ]);
+
+    let data: AppData = {};
+
+    if (mainSnap.exists()) {
+      data = mainSnap.data() as AppData;
     }
-    return null;
+
+    // 1. Resolve Exam Results
+    const resultsFromCollection: ExamResult[] = [];
+    if (resultsSnap && !resultsSnap.empty) {
+      resultsSnap.forEach((d) => {
+        resultsFromCollection.push(d.data() as ExamResult);
+      });
+    }
+
+    // Merge with legacy results if present
+    const legacyResults = Array.isArray(data.results) ? data.results : [];
+    const resultMap = new Map<string, ExamResult>();
+    [...legacyResults, ...resultsFromCollection].forEach((r) => {
+      if (r && r.id) resultMap.set(r.id, r);
+    });
+    data.results = Array.from(resultMap.values());
+
+    // 2. Resolve Game Logs
+    const gameLogsFromCollection: GameHistoryLog[] = [];
+    if (gameLogsSnap && !gameLogsSnap.empty) {
+      gameLogsSnap.forEach((d) => {
+        gameLogsFromCollection.push(d.data() as GameHistoryLog);
+      });
+    }
+    const legacyGameLogs = Array.isArray(data.gameLogs) ? data.gameLogs : [];
+    const gameLogMap = new Map<string, GameHistoryLog>();
+    [...legacyGameLogs, ...gameLogsFromCollection].forEach((g) => {
+      if (g && g.id) gameLogMap.set(g.id, g);
+    });
+    data.gameLogs = Array.from(gameLogMap.values());
+
+    // 3. Resolve Login Logs
+    const loginLogsFromCollection: UserLoginLog[] = [];
+    if (loginLogsSnap && !loginLogsSnap.empty) {
+      loginLogsSnap.forEach((d) => {
+        loginLogsFromCollection.push(d.data() as UserLoginLog);
+      });
+    }
+    const legacyLoginLogs = Array.isArray(data.loginLogs) ? data.loginLogs : [];
+    const loginLogMap = new Map<string, UserLoginLog>();
+    [...legacyLoginLogs, ...loginLogsFromCollection].forEach((l) => {
+      if (l && l.id) loginLogMap.set(l.id, l);
+    });
+    data.loginLogs = Array.from(loginLogMap.values());
+
+    return data;
   } catch (err: any) {
     if (!silent) {
       console.warn('[Firestore] Notice fetching app data:', err?.message || err);
@@ -91,26 +161,69 @@ export async function fetchAppDataFromFirestore(silent = true): Promise<AppData 
   }
 }
 
-// Save or partial merge app data to Firestore
+/**
+ * Save master data to Firestore (app_data/main).
+ * Automatically excludes high-volume items (results, gameLogs, loginLogs) from bloating main document.
+ */
 export async function saveAppDataToFirestore(data: Partial<AppData>): Promise<boolean> {
   const db = getFirestoreDb();
   if (!db) return false;
 
   try {
+    // Clone and separate master data from dynamic high-volume items
+    const { results, gameLogs, loginLogs, ...masterData } = data;
+
     const docRef = doc(db, MAIN_COLLECTION, MAIN_DOCUMENT);
-    const payload: Partial<AppData> = {
-      ...data,
+    const payload = {
+      ...masterData,
       updatedAt: new Date().toISOString(),
     };
+
     await setDoc(docRef, payload, { merge: true });
+
+    // If results are explicitly provided in payload, save each individually to exam_results collection
+    if (Array.isArray(results) && results.length > 0) {
+      const batch = writeBatch(db);
+      results.slice(0, 100).forEach((r) => {
+        if (r && r.id) {
+          batch.set(doc(db, EXAM_RESULTS_COLLECTION, r.id), r, { merge: true });
+        }
+      });
+      await batch.commit().catch(() => {});
+    }
+
+    // If gameLogs are explicitly provided, save individually to game_logs collection
+    if (Array.isArray(gameLogs) && gameLogs.length > 0) {
+      const batch = writeBatch(db);
+      gameLogs.slice(0, 100).forEach((g) => {
+        if (g && g.id) {
+          batch.set(doc(db, GAME_LOGS_COLLECTION, g.id), g, { merge: true });
+        }
+      });
+      await batch.commit().catch(() => {});
+    }
+
+    // If loginLogs are explicitly provided, save individually to login_logs collection
+    if (Array.isArray(loginLogs) && loginLogs.length > 0) {
+      const batch = writeBatch(db);
+      loginLogs.slice(0, 100).forEach((l) => {
+        if (l && l.id) {
+          batch.set(doc(db, LOGIN_LOGS_COLLECTION, l.id), l, { merge: true });
+        }
+      });
+      await batch.commit().catch(() => {});
+    }
+
     return true;
   } catch (err: any) {
-    console.warn('[Firestore] Notice saving app data to cloud:', err?.message || err);
+    console.warn('[Firestore] Notice saving master data to cloud:', err?.message || err);
     return false;
   }
 }
 
-// Subscribe to real-time changes
+/**
+ * Subscribe to real-time changes across master data and dynamic collections
+ */
 export function subscribeToAppData(
   onData: (data: AppData, isLocalWrite: boolean) => void,
   onError?: (err: Error) => void
@@ -119,71 +232,240 @@ export function subscribeToAppData(
   if (!db) return null;
 
   try {
-    const docRef = doc(db, MAIN_COLLECTION, MAIN_DOCUMENT);
-    const unsubscribe = onSnapshot(
-      docRef,
+    let currentMaster: AppData = {};
+    let currentResults: ExamResult[] = [];
+    let currentGameLogs: GameHistoryLog[] = [];
+    let currentLoginLogs: UserLoginLog[] = [];
+
+    const emitConsolidated = (isLocalWrite: boolean) => {
+      const consolidated: AppData = {
+        ...currentMaster,
+        results: currentResults,
+        gameLogs: currentGameLogs,
+        loginLogs: currentLoginLogs,
+      };
+      onData(consolidated, isLocalWrite);
+    };
+
+    // 1. Listener for app_data/main (Master Data)
+    const unsubMain = onSnapshot(
+      doc(db, MAIN_COLLECTION, MAIN_DOCUMENT),
       { includeMetadataChanges: true },
       (snap) => {
         if (snap.exists()) {
-          const isLocalWrite = snap.metadata.hasPendingWrites;
-          onData(snap.data() as AppData, isLocalWrite);
+          const raw = snap.data() as AppData;
+          const { results, gameLogs, loginLogs, ...restMaster } = raw;
+          currentMaster = restMaster;
+          emitConsolidated(snap.metadata.hasPendingWrites);
         }
       },
-      (err) => {
-        if (onError) onError(err);
-      }
+      (err) => onError && onError(err)
     );
-    return unsubscribe;
+
+    // 2. Listener for exam_results collection (Real-time student exam submissions)
+    const unsubResults = onSnapshot(
+      collection(db, EXAM_RESULTS_COLLECTION),
+      { includeMetadataChanges: true },
+      (snap) => {
+        const list: ExamResult[] = [];
+        snap.forEach((d) => {
+          list.push(d.data() as ExamResult);
+        });
+        currentResults = list.sort((a, b) => {
+          const timeA = new Date(a.date || (a as any).completedAt || 0).getTime();
+          const timeB = new Date(b.date || (b as any).completedAt || 0).getTime();
+          return timeB - timeA;
+        });
+        emitConsolidated(snap.metadata.hasPendingWrites);
+      },
+      (err) => onError && onError(err)
+    );
+
+    // 3. Listener for game_logs collection
+    const unsubGameLogs = onSnapshot(
+      collection(db, GAME_LOGS_COLLECTION),
+      { includeMetadataChanges: true },
+      (snap) => {
+        const list: GameHistoryLog[] = [];
+        snap.forEach((d) => {
+          list.push(d.data() as GameHistoryLog);
+        });
+        currentGameLogs = list.sort((a, b) => {
+          const timeA = new Date(a.timestamp || (a as any).playedAt || 0).getTime();
+          const timeB = new Date(b.timestamp || (b as any).playedAt || 0).getTime();
+          return timeB - timeA;
+        });
+        emitConsolidated(snap.metadata.hasPendingWrites);
+      },
+      (err) => onError && onError(err)
+    );
+
+    // 4. Listener for login_logs collection
+    const unsubLoginLogs = onSnapshot(
+      collection(db, LOGIN_LOGS_COLLECTION),
+      { includeMetadataChanges: true },
+      (snap) => {
+        const list: UserLoginLog[] = [];
+        snap.forEach((d) => {
+          list.push(d.data() as UserLoginLog);
+        });
+        currentLoginLogs = list.sort((a, b) => {
+          return (b.lastSeenTime || '').localeCompare(a.lastSeenTime || '');
+        });
+        emitConsolidated(snap.metadata.hasPendingWrites);
+      },
+      (err) => onError && onError(err)
+    );
+
+    return () => {
+      unsubMain();
+      unsubResults();
+      unsubGameLogs();
+      unsubLoginLogs();
+    };
   } catch (err) {
     console.warn('[Firestore Realtime Subscription Warning]:', err);
     return null;
   }
 }
 
-// Safely append/update an exam result to prevent overwriting other students' results
+/**
+ * Safely writes an individual student exam result to dedicated 'exam_results' collection.
+ * 100% thread-safe: zero race conditions when 50+ students submit exams concurrently.
+ */
 export async function syncExamResultToFirestore(result: ExamResult): Promise<void> {
+  const db = getFirestoreDb();
+  if (!db || !result || !result.id) return;
+
   try {
-    const current = await fetchAppDataFromFirestore(true);
-    const existingResults: ExamResult[] = current?.results || [];
-    const filtered = existingResults.filter((r) => r.id !== result.id);
-    const updated = [result, ...filtered];
-    await saveAppDataToFirestore({ results: updated });
+    const resultRef = doc(db, EXAM_RESULTS_COLLECTION, result.id);
+    await setDoc(resultRef, result, { merge: true });
+    console.log('[Firestore] Hasil ujian siswa tersimpan mandiri di koleksi exam_results:', result.studentName);
   } catch (err) {
-    console.warn('[Firestore] Unable to append exam result:', err);
+    console.warn('[Firestore] Gagal menyimpan hasil ujian mandiri:', err);
   }
 }
 
-// Safely append/update a game log to prevent overwriting other students' logs
+/**
+ * Delete a single exam result document from Firestore
+ */
+export async function deleteExamResultFromFirestore(resultId: string): Promise<void> {
+  const db = getFirestoreDb();
+  if (!db || !resultId) return;
+
+  try {
+    await deleteDoc(doc(db, EXAM_RESULTS_COLLECTION, resultId));
+  } catch (err) {
+    console.warn('[Firestore] Gagal menghapus hasil ujian:', err);
+  }
+}
+
+/**
+ * Safely writes an individual game log to dedicated 'game_logs' collection.
+ */
 export async function syncGameLogToFirestore(log: GameHistoryLog): Promise<void> {
+  const db = getFirestoreDb();
+  if (!db || !log || !log.id) return;
+
   try {
-    const current = await fetchAppDataFromFirestore(true);
-    const existingLogs: GameHistoryLog[] = current?.gameLogs || [];
-    const filtered = existingLogs.filter((l) => l.id !== log.id);
-    const updated = [log, ...filtered];
-    await saveAppDataToFirestore({ gameLogs: updated });
+    const logRef = doc(db, GAME_LOGS_COLLECTION, log.id);
+    await setDoc(logRef, log, { merge: true });
   } catch (err) {
-    console.warn('[Firestore] Unable to append game log:', err);
+    console.warn('[Firestore] Gagal menyimpan riwayat game mandiri:', err);
   }
 }
 
-// Reset all cloud data
+/**
+ * Delete a single game log document from Firestore
+ */
+export async function deleteGameLogFromFirestore(logId: string): Promise<void> {
+  const db = getFirestoreDb();
+  if (!db || !logId) return;
+
+  try {
+    await deleteDoc(doc(db, GAME_LOGS_COLLECTION, logId));
+  } catch (err) {
+    console.warn('[Firestore] Gagal menghapus game log:', err);
+  }
+}
+
+/**
+ * Clear all game logs from Firestore
+ */
+export async function clearAllGameLogsInFirestore(): Promise<void> {
+  const db = getFirestoreDb();
+  if (!db) return;
+
+  try {
+    const snaps = await getDocs(collection(db, GAME_LOGS_COLLECTION));
+    if (!snaps.empty) {
+      const batch = writeBatch(db);
+      snaps.forEach((d) => {
+        batch.delete(d.ref);
+      });
+      await batch.commit();
+    }
+  } catch (err) {
+    console.warn('[Firestore] Gagal membersihkan semua game logs:', err);
+  }
+}
+
+/**
+ * Track user login / heartbeat directly in 'login_logs' collection
+ */
+export async function trackUserLoginInFirestore(log: UserLoginLog): Promise<void> {
+  const db = getFirestoreDb();
+  if (!db || !log || !log.id) return;
+
+  try {
+    const logRef = doc(db, LOGIN_LOGS_COLLECTION, log.id);
+    await setDoc(logRef, log, { merge: true });
+  } catch (err) {
+    // Silent on network glitch
+  }
+}
+
+/**
+ * Reset all data across master document and all subcollections
+ */
 export async function resetAllDataInFirestore(): Promise<boolean> {
   const db = getFirestoreDb();
   if (!db) return false;
 
   try {
-    const docRef = doc(db, MAIN_COLLECTION, MAIN_DOCUMENT);
-    await setDoc(docRef, {
+    const batch = writeBatch(db);
+
+    // 1. Reset master doc
+    const mainDocRef = doc(db, MAIN_COLLECTION, MAIN_DOCUMENT);
+    batch.set(mainDocRef, {
       teachers: [],
       students: [],
       subjects: [],
       banks: [],
-      results: [],
-      gameLogs: [],
-      loginLogs: [],
+      dailyGrades: [],
       gameData: {},
       updatedAt: new Date().toISOString(),
     });
+
+    // 2. Delete all exam_results
+    const resultsSnap = await getDocs(collection(db, EXAM_RESULTS_COLLECTION)).catch(() => null);
+    if (resultsSnap && !resultsSnap.empty) {
+      resultsSnap.forEach((d) => batch.delete(d.ref));
+    }
+
+    // 3. Delete all game_logs
+    const gameLogsSnap = await getDocs(collection(db, GAME_LOGS_COLLECTION)).catch(() => null);
+    if (gameLogsSnap && !gameLogsSnap.empty) {
+      gameLogsSnap.forEach((d) => batch.delete(d.ref));
+    }
+
+    // 4. Delete all login_logs
+    const loginLogsSnap = await getDocs(collection(db, LOGIN_LOGS_COLLECTION)).catch(() => null);
+    if (loginLogsSnap && !loginLogsSnap.empty) {
+      loginLogsSnap.forEach((d) => batch.delete(d.ref));
+    }
+
+    await batch.commit();
     return true;
   } catch (err: any) {
     console.warn('[Firestore] Error resetting app data in Firestore:', err?.message || err);
@@ -191,17 +473,3 @@ export async function resetAllDataInFirestore(): Promise<boolean> {
   }
 }
 
-// Track user login
-export async function trackUserLoginInFirestore(log: UserLoginLog): Promise<void> {
-  try {
-    const current = await fetchAppDataFromFirestore(true);
-    const existingLogs: UserLoginLog[] = current?.loginLogs || [];
-    const filtered = existingLogs.filter(
-      (l) => !(l.name.toLowerCase() === log.name.toLowerCase() && l.role === log.role)
-    );
-    const updated = [log, ...filtered].slice(0, 100);
-    await saveAppDataToFirestore({ loginLogs: updated });
-  } catch (err) {
-    // Silent on offline
-  }
-}

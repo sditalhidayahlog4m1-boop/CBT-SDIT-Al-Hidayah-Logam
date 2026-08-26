@@ -3,14 +3,30 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // Aturan untuk dokumen data aplikasi CBT SDIT Al Hidayah Logam
+    // Aturan untuk dokumen master data aplikasi CBT SDIT Al Hidayah Logam
     match /app_data/{docId} {
       allow read, write: if true;
     }
+
+    // Aturan untuk koleksi hasil ujian per siswa (concurrent writes)
+    match /exam_results/{resultId} {
+      allow read, write: if true;
+    }
+
+    // Aturan untuk riwayat permainan game edukasi
+    match /game_logs/{logId} {
+      allow read, write: if true;
+    }
+
+    // Aturan untuk log status dan keaktifan login pengguna
+    match /login_logs/{logId} {
+      allow read, write: if true;
+    }
     
-    // Aturan untuk koleksi umum lainnya
+    // Aturan default untuk koleksi umum lainnya
     match /{document=**} {
       allow read, write: if true;
     }
   }
 }
+

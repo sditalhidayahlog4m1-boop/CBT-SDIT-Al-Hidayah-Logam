@@ -75,6 +75,8 @@ import {
   trackUserLoginInFirestore,
   syncExamResultToFirestore,
   syncGameLogToFirestore,
+  deleteGameLogFromFirestore,
+  clearAllGameLogsInFirestore,
   AppData,
 } from './utils/firebaseSync';
 import { subscribeToLocalSync, broadcastAppDataChange } from './utils/syncEngine';
@@ -562,16 +564,16 @@ export default function App() {
   const handleClearGameLogs = useCallback(() => {
     setGameLogs([]);
     saveStoredGameLogs([]);
-    saveAppDataToFirestore({ gameLogs: [] });
+    clearAllGameLogsInFirestore();
   }, []);
 
   const handleDeleteGameLog = useCallback((id: string) => {
     setGameLogs((prev) => {
       const updated = prev.filter((item) => item.id !== id);
       saveStoredGameLogs(updated);
-      saveAppDataToFirestore({ gameLogs: updated });
       return updated;
     });
+    deleteGameLogFromFirestore(id);
   }, []);
 
   const handleRefreshGameLogs = useCallback(async (): Promise<boolean> => {

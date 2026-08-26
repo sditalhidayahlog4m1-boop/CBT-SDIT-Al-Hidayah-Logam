@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { History, Download, Eye, Search, Trash2, Award, CheckCircle2, XCircle, Filter, BookOpen } from 'lucide-react';
 import { ExamResult, QuestionBank } from '../types';
 import { exportExamResultsExcel } from '../utils/exportImport';
+import { deleteExamResultFromFirestore } from '../utils/firebaseSync';
 import { ConfirmModal, ToastContainer, ToastMessage } from './NotificationModal';
 
 interface ExamHistoryViewProps {
@@ -58,6 +59,7 @@ export const ExamHistoryView: React.FC<ExamHistoryViewProps> = ({
     const studentName = deleteConfirmTarget.studentName;
     const targetId = deleteConfirmTarget.id;
     setResults((prev) => prev.filter((r) => r.id !== targetId));
+    deleteExamResultFromFirestore(targetId);
     if (selectedResult?.id === targetId) setSelectedResult(null);
     setDeleteConfirmTarget(null);
     addToast('success', `Riwayat ujian ${studentName} berhasil dihapus.`, 'Berhasil Dihapus');

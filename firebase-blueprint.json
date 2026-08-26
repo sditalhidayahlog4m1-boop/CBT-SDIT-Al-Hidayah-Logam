@@ -2,16 +2,16 @@
   "entities": {
     "app_data": {
       "title": "AppData",
-      "description": "Dokumen tunggal penyimpan data aplikasi sekolah, bank soal, guru, siswa, hasil ujian, riwayat game, profil sekolah, hak akses, kredensial admin, dan log login.",
+      "description": "Dokumen data master aplikasi sekolah: data guru, data siswa, mata pelajaran, bank soal, profil sekolah, hak akses, data game, nilai harian, dan kredensial admin.",
       "type": "object",
       "properties": {
         "teachers": {
           "type": "array",
-          "description": "Daftar data guru"
+          "description": "Daftar master data guru"
         },
         "students": {
           "type": "array",
-          "description": "Daftar data siswa"
+          "description": "Daftar master data siswa"
         },
         "subjects": {
           "type": "array",
@@ -19,19 +19,11 @@
         },
         "banks": {
           "type": "array",
-          "description": "Daftar bank soal"
+          "description": "Daftar bank soal CBT"
         },
-        "results": {
+        "dailyGrades": {
           "type": "array",
-          "description": "Daftar hasil ujian siswa"
-        },
-        "gameLogs": {
-          "type": "array",
-          "description": "Riwayat permainan game edukasi"
-        },
-        "loginLogs": {
-          "type": "array",
-          "description": "Riwayat login pengguna"
+          "description": "Rekap nilai harian siswa"
         },
         "schoolProfile": {
           "type": "object",
@@ -55,12 +47,180 @@
         }
       },
       "required": ["updatedAt"]
+    },
+    "exam_result": {
+      "title": "ExamResult",
+      "description": "Dokumen hasil ujian mandiri per siswa untuk mencegah konflik penulisan serentak dan limit 1MB.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "ID unik hasil ujian"
+        },
+        "date": {
+          "type": "string",
+          "description": "Waktu dan tanggal ujian"
+        },
+        "studentName": {
+          "type": "string",
+          "description": "Nama siswa"
+        },
+        "classRoom": {
+          "type": "string",
+          "description": "Nama kelas"
+        },
+        "subject": {
+          "type": "string",
+          "description": "Mata pelajaran"
+        },
+        "examTitle": {
+          "type": "string",
+          "description": "Judul ujian"
+        },
+        "score": {
+          "type": "number",
+          "description": "Nilai akhir siswa"
+        },
+        "totalQuestions": {
+          "type": "number",
+          "description": "Jumlah soal ujian"
+        },
+        "correctCount": {
+          "type": "number",
+          "description": "Jumlah jawaban benar"
+        },
+        "wrongCount": {
+          "type": "number",
+          "description": "Jumlah jawaban salah"
+        },
+        "token": {
+          "type": "string",
+          "description": "Token ujian"
+        },
+        "durationSpent": {
+          "type": "string",
+          "description": "Lama waktu pengerjaan"
+        },
+        "passed": {
+          "type": "boolean",
+          "description": "Status kelulusan KKM"
+        },
+        "answers": {
+          "type": "object",
+          "description": "Rincian jawaban siswa per nomor soal"
+        },
+        "bankId": {
+          "type": "string",
+          "description": "ID bank soal terkait"
+        }
+      },
+      "required": ["id", "studentName", "score", "date"]
+    },
+    "game_log": {
+      "title": "GameLog",
+      "description": "Dokumen riwayat permainan game edukasi interaktif mandiri.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "ID sesi game"
+        },
+        "timestamp": {
+          "type": "string",
+          "description": "Waktu bermain"
+        },
+        "studentName": {
+          "type": "string",
+          "description": "Nama pemain / siswa"
+        },
+        "classRoom": {
+          "type": "string",
+          "description": "Kelas"
+        },
+        "gameType": {
+          "type": "string",
+          "description": "Tipe game"
+        },
+        "subject": {
+          "type": "string",
+          "description": "Mata pelajaran"
+        },
+        "difficulty": {
+          "type": "string",
+          "description": "Tingkat kesulitan"
+        },
+        "topic": {
+          "type": "string",
+          "description": "Topik materi game"
+        },
+        "score": {
+          "type": "number",
+          "description": "Skor perolehan"
+        },
+        "correctCount": {
+          "type": "number",
+          "description": "Jumlah jawaban benar"
+        },
+        "totalQuestions": {
+          "type": "number",
+          "description": "Total soal"
+        }
+      },
+      "required": ["id", "studentName", "score", "timestamp"]
+    },
+    "login_log": {
+      "title": "LoginLog",
+      "description": "Dokumen status aktivitas dan login pengguna real-time.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "ID unik log login"
+        },
+        "userId": {
+          "type": "string",
+          "description": "ID atau username pengguna"
+        },
+        "name": {
+          "type": "string",
+          "description": "Nama lengkap pengguna"
+        },
+        "role": {
+          "type": "string",
+          "description": "Role (admin, guru, siswa, umum)"
+        },
+        "identifier": {
+          "type": "string",
+          "description": "Nomor NIP, NISN, atau username"
+        },
+        "loginTime": {
+          "type": "string",
+          "description": "Waktu awal login"
+        },
+        "lastSeenTime": {
+          "type": "string",
+          "description": "Waktu keaktifan terakhir (heartbeat)"
+        }
+      },
+      "required": ["id", "name", "role", "loginTime"]
     }
   },
   "firestore": {
     "app_data/{docId}": {
       "entity": "app_data",
-      "description": "Dokumen app_data/main untuk sinkronisasi cloud real-time antar perangkat"
+      "description": "Dokumen app_data/main untuk data master sekolah dan bank soal"
+    },
+    "exam_results/{resultId}": {
+      "entity": "exam_result",
+      "description": "Koleksi mandiri hasil ujian siswa untuk menangani ujian serentak tanpa race condition"
+    },
+    "game_logs/{logId}": {
+      "entity": "game_log",
+      "description": "Koleksi mandiri riwayat game edukasi"
+    },
+    "login_logs/{logId}": {
+      "entity": "login_log",
+      "description": "Koleksi mandiri log dan status keaktifan login pengguna"
     }
   }
 }
