@@ -6,6 +6,7 @@ export interface AuthUser {
   photoUrl?: string;
   birthDate?: string;
   details?: Teacher | Student | null;
+  lastLogin?: string;
 }
 
 export interface Teacher {
@@ -26,6 +27,7 @@ export interface Teacher {
   username?: string;
   password?: string;
   photoUrl?: string;
+  lastLogin?: string;
 }
 
 export interface Student {
@@ -48,6 +50,7 @@ export interface Student {
   username?: string;
   password?: string;
   photoUrl?: string;
+  lastLogin?: string;
 }
 
 export interface Subject {

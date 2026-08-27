@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { Plus, Edit2, Trash2, Download, Upload, Search, UserCheck, Phone, MapPin, Calendar, Briefcase, FileText, CheckCircle2, XCircle } from 'lucide-react';
-import { Teacher } from '../types';
+import { Plus, Edit2, Trash2, Download, Upload, Search, UserCheck, Phone, MapPin, Calendar, Briefcase, FileText, CheckCircle2, XCircle, Clock } from 'lucide-react';
+import { Teacher, UserLoginLog } from '../types';
 import { downloadGuruTemplate } from '../utils/exportImport';
 import * as XLSX from 'xlsx';
 import { ConfirmModal, ToastContainer, ToastMessage } from './NotificationModal';
@@ -46,6 +46,7 @@ function parseExcelDateValue(val: any): string {
 interface TeacherDataViewProps {
   teachers: Teacher[];
   setTeachers: React.Dispatch<React.SetStateAction<Teacher[]>>;
+  loginLogs?: UserLoginLog[];
 }
 
 const JABATAN_OPTIONS = [
@@ -57,7 +58,7 @@ const JABATAN_OPTIONS = [
   'Lainnya',
 ];
 
-export const TeacherDataView: React.FC<TeacherDataViewProps> = ({ teachers, setTeachers }) => {
+export const TeacherDataView: React.FC<TeacherDataViewProps> = ({ teachers, setTeachers, loginLogs = [] }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterJabatan, setFilterJabatan] = useState('Semua');
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -438,12 +439,22 @@ export const TeacherDataView: React.FC<TeacherDataViewProps> = ({ teachers, setT
                 <th className="p-4 min-w-[200px]">ALAMAT RUMAH</th>
                 <th className="p-4 min-w-[150px]">NO HP / WA AKTIF</th>
                 <th className="p-4 text-center w-28">STATUS KEAKTIFAN</th>
+                <th className="p-4 min-w-[180px] text-center">TERAKHIR LOGIN</th>
                 <th className="p-4 text-center w-20">AKSI</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/80 text-slate-200 font-medium">
               {filtered.map((teacher, idx) => {
                 const isSelected = selectedIds.includes(teacher.id);
+                const teacherLog = loginLogs?.find(
+                  (l) =>
+                    (l.userId && l.userId === teacher.id) ||
+                    (teacher.nip && l.identifier && l.identifier === teacher.nip) ||
+                    (teacher.nuptk && l.identifier && l.identifier === teacher.nuptk) ||
+                    (l.name && l.name.toLowerCase() === teacher.name.toLowerCase() && l.role === 'guru')
+                );
+                const lastLoginDisplay = teacher.lastLogin || teacherLog?.lastSeenTime || teacherLog?.loginTime;
+
                 return (
                   <tr
                     key={teacher.id}
@@ -558,6 +569,20 @@ export const TeacherDataView: React.FC<TeacherDataViewProps> = ({ teachers, setT
                       )}
                       <span>{teacher.activeStatus || 'Aktif'}</span>
                     </span>
+                  </td>
+
+                  {/* Terakhir Login */}
+                  <td className="p-4 text-center">
+                    {lastLoginDisplay ? (
+                      <div className="inline-flex items-center justify-center gap-1.5 text-emerald-300 bg-emerald-500/10 px-2.5 py-1 rounded-xl border border-emerald-500/20 text-[11px] font-mono font-bold shadow-sm">
+                        <Clock className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        <span>{lastLoginDisplay}</span>
+                      </div>
+                    ) : (
+                      <span className="inline-block text-[10px] text-slate-500 bg-slate-900/60 px-2 py-0.5 rounded border border-slate-800 font-medium">
+                        Belum Pernah Login
+                      </span>
+                    )}
                   </td>
 
                   {/* Aksi */}

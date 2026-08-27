@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { Plus, Edit2, Trash2, Download, Upload, Search, GraduationCap, Phone, MapPin, Calendar, Users, CheckCircle2, XCircle } from 'lucide-react';
-import { Student } from '../types';
+import { Plus, Edit2, Trash2, Download, Upload, Search, GraduationCap, Phone, MapPin, Calendar, Users, CheckCircle2, XCircle, Clock } from 'lucide-react';
+import { Student, UserLoginLog } from '../types';
 import { downloadSiswaTemplate } from '../utils/exportImport';
 import * as XLSX from 'xlsx';
 import { ConfirmModal, ToastContainer, ToastMessage } from './NotificationModal';
@@ -49,9 +49,10 @@ function parseExcelDateValue(val: any): string {
 interface StudentDataViewProps {
   students: Student[];
   setStudents: React.Dispatch<React.SetStateAction<Student[]>>;
+  loginLogs?: UserLoginLog[];
 }
 
-export const StudentDataView: React.FC<StudentDataViewProps> = ({ students, setStudents }) => {
+export const StudentDataView: React.FC<StudentDataViewProps> = ({ students, setStudents, loginLogs = [] }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterClass, setFilterClass] = useState('Semua');
   const [filterStatus, setFilterStatus] = useState('Semua');
@@ -470,12 +471,22 @@ export const StudentDataView: React.FC<StudentDataViewProps> = ({ students, setS
                 <th className="p-4 min-w-[170px]">NO HP AYAH & IBU</th>
                 <th className="p-4 min-w-[160px]">KELAS & TAHUN AJARAN</th>
                 <th className="p-4 text-center w-24">STATUS</th>
+                <th className="p-4 min-w-[180px] text-center">TERAKHIR LOGIN</th>
                 <th className="p-4 text-center w-20">AKSI</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/80 text-slate-200 font-medium">
               {filtered.map((student, idx) => {
                 const isSelected = selectedIds.includes(student.id);
+                const studentLog = loginLogs?.find(
+                  (l) =>
+                    (l.userId && l.userId === student.id) ||
+                    (student.nisn && l.identifier && l.identifier === student.nisn) ||
+                    (student.nis && l.identifier && l.identifier === student.nis) ||
+                    (l.name && l.name.toLowerCase() === student.name.toLowerCase() && l.role === 'siswa')
+                );
+                const lastLoginDisplay = student.lastLogin || studentLog?.lastSeenTime || studentLog?.loginTime;
+
                 return (
                   <tr
                     key={student.id}
@@ -607,6 +618,20 @@ export const StudentDataView: React.FC<StudentDataViewProps> = ({ students, setS
                       )}
                       <span>{student.activeStatus || 'Aktif'}</span>
                     </span>
+                  </td>
+
+                  {/* Terakhir Login */}
+                  <td className="p-4 text-center">
+                    {lastLoginDisplay ? (
+                      <div className="inline-flex items-center justify-center gap-1.5 text-emerald-300 bg-emerald-500/10 px-2.5 py-1 rounded-xl border border-emerald-500/20 text-[11px] font-mono font-bold shadow-sm">
+                        <Clock className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        <span>{lastLoginDisplay}</span>
+                      </div>
+                    ) : (
+                      <span className="inline-block text-[10px] text-slate-500 bg-slate-900/60 px-2 py-0.5 rounded border border-slate-800 font-medium">
+                        Belum Pernah Login
+                      </span>
+                    )}
                   </td>
 
                   {/* Aksi */}

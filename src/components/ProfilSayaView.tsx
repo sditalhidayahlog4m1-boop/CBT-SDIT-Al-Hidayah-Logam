@@ -25,6 +25,7 @@ import {
   Building,
   HeartHandshake,
   RefreshCw,
+  Clock,
 } from 'lucide-react';
 import { AuthUser, Teacher, Student } from '../types';
 import {
@@ -723,6 +724,14 @@ export const ProfilSayaView: React.FC<ProfilSayaViewProps> = ({
                     <span className="text-[11px] font-bold text-emerald-300">Tersimpan Otomatis</span>
                   </>
                 )}
+              </div>
+
+              {/* Terakhir Login Badge */}
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-950/80 border border-slate-700/80 shadow-inner">
+                <Clock className="w-3.5 h-3.5 text-sky-400" />
+                <span className="text-[11px] font-bold text-slate-300">
+                  Login Terakhir: <strong className="text-sky-300 font-mono">{currentUser.lastLogin || currentUser.details?.lastLogin || 'Sesi Aktif'}</strong>
+                </span>
               </div>
             </div>
 

@@ -7,6 +7,7 @@ import {
   saveStoredResults,
   saveStoredGameLogs,
   saveStoredLoginLogs,
+  saveStoredDailyGrades,
   saveStoredSchoolProfile,
   saveStoredRolePermissions,
   saveStoredGameData,
@@ -36,6 +37,7 @@ export function broadcastAppDataChange(data: Partial<AppData>) {
   if (data.results) saveStoredResults(data.results);
   if (data.gameLogs) saveStoredGameLogs(data.gameLogs);
   if (data.loginLogs) saveStoredLoginLogs(data.loginLogs);
+  if (data.dailyGrades) saveStoredDailyGrades(data.dailyGrades);
   if (data.schoolProfile) saveStoredSchoolProfile(data.schoolProfile);
   if (data.rolePermissions) saveStoredRolePermissions(data.rolePermissions);
   if (data.gameData) saveStoredGameData(data.gameData);

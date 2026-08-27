@@ -11,6 +11,8 @@ import {
   Database,
   History,
   ArrowLeft,
+  Gamepad2,
+  Loader2,
 } from 'lucide-react';
 import { Teacher, Student, Subject, QuestionBank, ExamResult, ActiveTab } from '../types';
 
@@ -20,7 +22,7 @@ interface ResetDataViewProps {
   subjects: Subject[];
   banks: QuestionBank[];
   results: ExamResult[];
-  onResetAllData: () => void;
+  onResetAllData: () => Promise<void> | void;
   setActiveTab: (tab: ActiveTab) => void;
 }
 
@@ -35,18 +37,26 @@ export const ResetDataView: React.FC<ResetDataViewProps> = ({
 }) => {
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [confirmInput, setConfirmInput] = useState('');
+  const [isResetting, setIsResetting] = useState(false);
   const [resetSuccess, setResetSuccess] = useState(false);
 
   const totalQuestions = banks.reduce((acc, b) => acc + (b.questions?.length || 0), 0);
 
-  const handleConfirmReset = () => {
-    if (confirmInput.trim().toUpperCase() !== 'RESET') {
+  const handleConfirmReset = async () => {
+    if (confirmInput.trim().toUpperCase() !== 'RESET' || isResetting) {
       return;
     }
-    onResetAllData();
-    setShowConfirmModal(false);
-    setConfirmInput('');
-    setResetSuccess(true);
+    try {
+      setIsResetting(true);
+      await Promise.resolve(onResetAllData());
+      setShowConfirmModal(false);
+      setConfirmInput('');
+      setResetSuccess(true);
+    } catch (err) {
+      console.error('[Reset Error]:', err);
+    } finally {
+      setIsResetting(false);
+    }
   };
 
   return (
@@ -58,7 +68,7 @@ export const ResetDataView: React.FC<ResetDataViewProps> = ({
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-slate-800 pb-6">
           <div className="flex items-center gap-3">
             <div className="w-12 h-12 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-400 flex items-center justify-center shrink-0">
-              <RotateCcw className="w-6 h-6 animate-spin-slow" />
+              <RotateCcw className="w-6 h-6" />
             </div>
             <div>
               <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-rose-500/10 border border-rose-500/20 text-rose-400 font-bold text-[11px] mb-1">
@@ -67,7 +77,7 @@ export const ResetDataView: React.FC<ResetDataViewProps> = ({
               </div>
               <h2 className="text-xl font-black text-slate-100">Reset Semua Data System</h2>
               <p className="text-xs text-slate-400">
-                Kosongkan seluruh data master, bank soal bawaan, dan riwayat ujian
+                Kosongkan seluruh data master, bank soal, hasil ujian, dan log aktivitas di Cloud Firestore
               </p>
             </div>
           </div>
@@ -87,10 +97,10 @@ export const ResetDataView: React.FC<ResetDataViewProps> = ({
             <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
             <div className="space-y-1 text-xs">
               <h4 className="font-bold text-sm text-emerald-300">
-                Berhasil! Semua data telah dikosongkan.
+                Berhasil! Seluruh data sistem telah dikosongkan bersih.
               </h4>
-              <p className="text-emerald-400/90 leading-relaxed">
-                Seluruh data guru, siswa, mata pelajaran, bank soal bawaan, dan riwayat ujian kini telah bernilai kosong (0 record).
+              <p className="text-emerald-400/90 leading-relaxed font-medium">
+                Seluruh data Guru, Siswa, Mata Pelajaran, Bank Soal, Dasbor Statistik, dan Riwayat Ujian di Firebase Firestore kini telah bernilai kosong (0 record) dan tersinkronisasi secara real-time ke semua perangkat.
               </p>
             </div>
           </div>
@@ -145,16 +155,16 @@ export const ResetDataView: React.FC<ResetDataViewProps> = ({
           </div>
           <ul className="list-disc pl-5 space-y-1 text-rose-200/90 leading-relaxed font-medium">
             <li>
-              Tindakan ini akan <strong>menghapus secara permanen</strong> seluruh data master (Guru, Siswa bawaan, Mata Pelajaran).
+              Tindakan ini akan <strong>menghapus secara permanen</strong> seluruh data master (Guru, Siswa, Mata Pelajaran).
             </li>
             <li>
               Semua <strong>Bank Soal bawaan & Soal buatan AI/upload</strong> akan dihapus sehingga daftar soal menjadi <strong>kosong (0)</strong>.
             </li>
             <li>
-              Semua <strong>Riwayat Hasil Ujian</strong> siswa akan dibersihkan.
+              Semua <strong>Riwayat Hasil Ujian CBT</strong> dan statistik Dasbor akan dibersihkan.
             </li>
             <li>
-              Proses ini tidak dapat dibatalkan kembali setelah dikonfirmasi.
+              Perubahan langsung disinkronkan ke <strong>Firebase Cloud Firestore</strong> sehingga akun lain yang sedang login langsung melihat data kosong secara real-time.
             </li>
           </ul>
         </div>
@@ -162,7 +172,12 @@ export const ResetDataView: React.FC<ResetDataViewProps> = ({
         {/* Action Button */}
         <div className="pt-2 flex flex-col sm:flex-row items-center justify-between gap-4 border-t border-slate-800">
           <div className="text-xs text-slate-400">
-            Status Sistem: <strong className="text-slate-200 font-bold">{teachers.length + students.length + banks.length === 0 ? 'Data Sudah Kosong (Clean State)' : 'Terisi Data'}</strong>
+            Status Sistem:{' '}
+            <strong className="text-slate-200 font-bold">
+              {teachers.length + students.length + banks.length + results.length === 0
+                ? 'Data Sudah Kosong (Clean State)'
+                : 'Terisi Data'}
+            </strong>
           </div>
 
           <button
@@ -186,7 +201,7 @@ export const ResetDataView: React.FC<ResetDataViewProps> = ({
             <div className="space-y-1">
               <h3 className="text-lg font-black text-slate-100">Konfirmasi Reset Data</h3>
               <p className="text-xs text-slate-300 leading-relaxed font-medium">
-                Apakah Anda yakin ingin mengosongkan seluruh data sistem, termasuk soal bawaan dan nama siswa bawaan?
+                Apakah Anda yakin ingin mengosongkan seluruh data sistem dari dasbor, bank soal, hingga riwayat ujian di database Firestore?
               </p>
             </div>
 
@@ -196,29 +211,38 @@ export const ResetDataView: React.FC<ResetDataViewProps> = ({
               </label>
               <input
                 type="text"
+                disabled={isResetting}
                 value={confirmInput}
                 onChange={(e) => setConfirmInput(e.target.value)}
                 placeholder="RESET"
-                className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-lg text-xs font-mono font-bold text-rose-400 uppercase focus:outline-none focus:ring-2 focus:ring-rose-500"
+                className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-lg text-xs font-mono font-bold text-rose-400 uppercase focus:outline-none focus:ring-2 focus:ring-rose-500 disabled:opacity-50"
               />
             </div>
 
             <div className="flex items-center gap-2 pt-2">
               <button
+                disabled={isResetting}
                 onClick={() => {
                   setShowConfirmModal(false);
                   setConfirmInput('');
                 }}
-                className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-xs border border-slate-700 transition-colors cursor-pointer"
+                className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-xs border border-slate-700 transition-colors cursor-pointer disabled:opacity-50"
               >
                 Batal
               </button>
               <button
-                disabled={confirmInput.trim().toUpperCase() !== 'RESET'}
+                disabled={confirmInput.trim().toUpperCase() !== 'RESET' || isResetting}
                 onClick={handleConfirmReset}
-                className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs shadow-lg shadow-rose-600/30 disabled:opacity-40 transition-all cursor-pointer"
+                className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs shadow-lg shadow-rose-600/30 disabled:opacity-40 transition-all cursor-pointer flex items-center justify-center gap-2"
               >
-                Ya, Reset Sekarang
+                {isResetting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Membersihkan...</span>
+                  </>
+                ) : (
+                  <span>Ya, Reset Sekarang</span>
+                )}
               </button>
             </div>
           </div>
@@ -227,3 +251,4 @@ export const ResetDataView: React.FC<ResetDataViewProps> = ({
     </div>
   );
 };
+

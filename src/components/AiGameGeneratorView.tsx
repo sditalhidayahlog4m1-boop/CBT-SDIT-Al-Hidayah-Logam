@@ -810,6 +810,15 @@ export const AiGameGeneratorView: React.FC<AiGameGeneratorViewProps> = ({
     }
     return [];
   });
+
+  // Active filtered game items based on selected difficulty filter
+  const activePlayItems = useMemo(() => {
+    if (selectedDifficultyFilter === 'Semua') {
+      return gameItems;
+    }
+    return gameItems.filter((item) => (item.difficulty || 'Sedang') === selectedDifficultyFilter);
+  }, [gameItems, selectedDifficultyFilter]);
+
   const [currentIdx, setCurrentIdx] = useState(0);
   const [score, setScore] = useState(0);
   const [correctAnswersCount, setCorrectAnswersCount] = useState(0);
@@ -874,7 +883,7 @@ export const AiGameGeneratorView: React.FC<AiGameGeneratorViewProps> = ({
 
   const playVerseAudio = (overrideText?: string, forceTTS = false) => {
     stopVerseAudio();
-    const item = gameItems[currentIdx];
+    const item = activePlayItems[currentIdx];
     if (!item) return;
 
     // Try authentic Qari MP3 recitation first if not forced TTS / not tts_indonesia
@@ -972,7 +981,7 @@ export const AiGameGeneratorView: React.FC<AiGameGeneratorViewProps> = ({
   };
 
   const playPromptAudio = () => {
-    const item = gameItems[currentIdx];
+    const item = activePlayItems[currentIdx];
     if (item && item.prompt_text) {
       stopVerseAudio();
       playTtsText(item.prompt_text, 'id-ID', 0.88 * playbackSpeed, 1.06);
@@ -980,7 +989,7 @@ export const AiGameGeneratorView: React.FC<AiGameGeneratorViewProps> = ({
   };
 
   const playTranslationAudio = () => {
-    const item = gameItems[currentIdx];
+    const item = activePlayItems[currentIdx];
     if (item && item.translation) {
       stopVerseAudio();
       playTtsText(item.translation, 'id-ID', 0.88 * playbackSpeed, 1.06);
@@ -991,13 +1000,13 @@ export const AiGameGeneratorView: React.FC<AiGameGeneratorViewProps> = ({
   useEffect(() => {
     setShowTranslationHint(false);
     stopVerseAudio();
-    if (activeMode === 'tebak-audio' && gameItems[currentIdx] && soundEnabled) {
+    if (activeMode === 'tebak-audio' && activePlayItems[currentIdx] && soundEnabled) {
       const timer = setTimeout(() => {
         playVerseAudio();
       }, 300);
       return () => clearTimeout(timer);
     }
-  }, [currentIdx, activeMode, selectedQari]);
+  }, [currentIdx, activeMode, selectedQari, activePlayItems, soundEnabled]);
 
   const handleSyncToBankSoal = () => {
     if (!gameItems || gameItems.length === 0) {
@@ -1523,14 +1532,6 @@ export const AiGameGeneratorView: React.FC<AiGameGeneratorViewProps> = ({
     setCards(shuffled);
     setFlippedCards([]);
   };
-
-  // Active filtered game items based on selected difficulty filter
-  const activePlayItems = useMemo(() => {
-    if (selectedDifficultyFilter === 'Semua') {
-      return gameItems;
-    }
-    return gameItems.filter((item) => (item.difficulty || 'Sedang') === selectedDifficultyFilter);
-  }, [gameItems, selectedDifficultyFilter]);
 
   // Auto-Save Game Log when game finishes
   useEffect(() => {

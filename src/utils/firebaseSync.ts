@@ -426,46 +426,59 @@ export async function trackUserLoginInFirestore(log: UserLoginLog): Promise<void
 }
 
 /**
- * Reset all data across master document and all subcollections
+ * Helper to delete all documents in a collection in safe chunked batches
+ */
+async function clearFirestoreCollection(db: Firestore, collectionName: string): Promise<void> {
+  try {
+    const snap = await getDocs(collection(db, collectionName)).catch(() => null);
+    if (!snap || snap.empty) return;
+
+    const docs = snap.docs;
+    // Commit deletions in safe batches of 300 (Firestore max is 500 per batch)
+    for (let i = 0; i < docs.length; i += 300) {
+      const chunk = docs.slice(i, i + 300);
+      const batch = writeBatch(db);
+      chunk.forEach((d) => batch.delete(d.ref));
+      await batch.commit().catch((err) => {
+        console.warn(`[Firestore] Batch deletion notice for ${collectionName}:`, err);
+      });
+    }
+  } catch (err) {
+    console.warn(`[Firestore] Error clearing collection ${collectionName}:`, err);
+  }
+}
+
+/**
+ * Reset all data across master document and all subcollections (exam_results, game_logs, login_logs)
  */
 export async function resetAllDataInFirestore(): Promise<boolean> {
   const db = getFirestoreDb();
   if (!db) return false;
 
   try {
-    const batch = writeBatch(db);
-
-    // 1. Reset master doc
+    // 1. Reset master document (app_data/main) to clean empty state
     const mainDocRef = doc(db, MAIN_COLLECTION, MAIN_DOCUMENT);
-    batch.set(mainDocRef, {
+    await setDoc(mainDocRef, {
       teachers: [],
       students: [],
       subjects: [],
       banks: [],
       dailyGrades: [],
       gameData: {},
+      results: [],
+      gameLogs: [],
+      loginLogs: [],
       updatedAt: new Date().toISOString(),
     });
 
-    // 2. Delete all exam_results
-    const resultsSnap = await getDocs(collection(db, EXAM_RESULTS_COLLECTION)).catch(() => null);
-    if (resultsSnap && !resultsSnap.empty) {
-      resultsSnap.forEach((d) => batch.delete(d.ref));
-    }
+    // 2. Completely delete all records in dedicated subcollections
+    await Promise.all([
+      clearFirestoreCollection(db, EXAM_RESULTS_COLLECTION),
+      clearFirestoreCollection(db, GAME_LOGS_COLLECTION),
+      clearFirestoreCollection(db, LOGIN_LOGS_COLLECTION),
+    ]);
 
-    // 3. Delete all game_logs
-    const gameLogsSnap = await getDocs(collection(db, GAME_LOGS_COLLECTION)).catch(() => null);
-    if (gameLogsSnap && !gameLogsSnap.empty) {
-      gameLogsSnap.forEach((d) => batch.delete(d.ref));
-    }
-
-    // 4. Delete all login_logs
-    const loginLogsSnap = await getDocs(collection(db, LOGIN_LOGS_COLLECTION)).catch(() => null);
-    if (loginLogsSnap && !loginLogsSnap.empty) {
-      loginLogsSnap.forEach((d) => batch.delete(d.ref));
-    }
-
-    await batch.commit();
+    console.log('[Firestore] Berhasil mengosongkan seluruh database Firebase Firestore (Clean State).');
     return true;
   } catch (err: any) {
     console.warn('[Firestore] Error resetting app data in Firestore:', err?.message || err);

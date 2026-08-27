@@ -426,11 +426,7 @@ export default function App() {
   }, [schoolProfile]);
 
   const handleLogin = (user: AuthUser) => {
-    setCurrentUser(user);
-    saveStoredCurrentUser(user);
-    setIsMobileMenuOpen(false);
-
-    // Record login event in loginLogs
+    // Record login event in loginLogs & update lastLogin on user
     const now = new Date();
     const formattedTime = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
     
@@ -444,6 +440,42 @@ export default function App() {
     } else if (user.role === 'guru' && user.details && 'nip' in user.details) {
       identifier = user.details.nip || user.details.nuptk || user.username || '';
       positionOrSubject = `${user.details.position || 'Guru'}${user.details.subject ? ` (${user.details.subject})` : ''}`;
+    }
+
+    const updatedUser: AuthUser = {
+      ...user,
+      lastLogin: formattedTime,
+      details: user.details ? { ...user.details, lastLogin: formattedTime } : user.details,
+    };
+
+    setCurrentUser(updatedUser);
+    saveStoredCurrentUser(updatedUser);
+    setIsMobileMenuOpen(false);
+
+    // Update teachers or students list to record lastLogin
+    if (user.role === 'guru') {
+      setTeachers((prev) =>
+        prev.map((t) => {
+          const isMatch =
+            (user.details && 'id' in user.details && t.id === user.details.id) ||
+            t.name.trim().toLowerCase() === user.name.trim().toLowerCase() ||
+            (t.username && t.username.trim().toLowerCase() === (user.username || '').trim().toLowerCase()) ||
+            (t.nip && t.nip === identifier);
+          return isMatch ? { ...t, lastLogin: formattedTime } : t;
+        })
+      );
+    } else if (user.role === 'siswa') {
+      setStudents((prev) =>
+        prev.map((s) => {
+          const isMatch =
+            (user.details && 'id' in user.details && s.id === user.details.id) ||
+            s.name.trim().toLowerCase() === user.name.trim().toLowerCase() ||
+            (s.username && s.username.trim().toLowerCase() === (user.username || '').trim().toLowerCase()) ||
+            (s.nisn && s.nisn === identifier) ||
+            (s.nis && s.nis === identifier);
+          return isMatch ? { ...s, lastLogin: formattedTime } : s;
+        })
+      );
     }
 
     const newLog: UserLoginLog = {
@@ -752,11 +784,11 @@ export default function App() {
           )}
 
           {activeTab === 'data-guru' && (
-            <TeacherDataView teachers={teachers} setTeachers={setTeachers} />
+            <TeacherDataView teachers={teachers} setTeachers={setTeachers} loginLogs={loginLogs} />
           )}
 
           {activeTab === 'data-siswa' && (
-            <StudentDataView students={students} setStudents={setStudents} />
+            <StudentDataView students={students} setStudents={setStudents} loginLogs={loginLogs} />
           )}
 
           {activeTab === 'mata-pelajaran' && (

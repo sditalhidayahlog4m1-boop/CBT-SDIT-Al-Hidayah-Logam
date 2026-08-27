@@ -115,21 +115,24 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   // Calculate pass percentage
   const totalLulus = results.filter((r) => r.passed).length;
-  const passPercentage = totalUjian > 0 ? Math.round((totalLulus / totalUjian) * 100) : 100;
+  const passPercentage = totalUjian > 0 ? Math.round((totalLulus / totalUjian) * 100) : 0;
 
   // Chart data for score distribution
   const chartScoreData = [
-    { range: '90 - 100 (Sangat Baik)', count: results.filter((r) => r.score >= 90).length || 1 },
-    { range: '75 - 89 (Baik)', count: results.filter((r) => r.score >= 75 && r.score < 90).length || 2 },
-    { range: '60 - 74 (Cukup)', count: results.filter((r) => r.score >= 60 && r.score < 75).length || 1 },
-    { range: '< 60 (Perlu Remedial)', count: results.filter((r) => r.score < 60).length || 0 },
+    { range: '90 - 100 (Sangat Baik)', count: results.filter((r) => r.score >= 90).length },
+    { range: '75 - 89 (Baik)', count: results.filter((r) => r.score >= 75 && r.score < 90).length },
+    { range: '60 - 74 (Cukup)', count: results.filter((r) => r.score >= 60 && r.score < 75).length },
+    { range: '< 60 (Perlu Remedial)', count: results.filter((r) => r.score < 60).length },
   ];
 
   // Pie chart data for pass vs fail
-  const pieData = [
-    { name: 'Lulus Ujian', value: totalLulus || 3, color: '#10b981' },
-    { name: 'Belum Lulus', value: Math.max(0, totalUjian - totalLulus) || 1, color: '#ef4444' },
-  ];
+  const pieData =
+    totalUjian > 0
+      ? [
+          { name: 'Lulus Ujian', value: totalLulus, color: '#10b981' },
+          { name: 'Belum Lulus', value: Math.max(0, totalUjian - totalLulus), color: '#ef4444' },
+        ]
+      : [{ name: 'Belum Ada Ujian', value: 1, color: '#334155' }];
 
   const stats = [
     {
