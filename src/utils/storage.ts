@@ -2,26 +2,33 @@ import { Teacher, Student, Subject, QuestionBank, ExamResult, AuthUser, RolePerm
 
 export function getStoredCurrentUser(): AuthUser | null {
   try {
-    // Check sessionStorage first (automatically cleared when tab/window is closed)
-    const saved = sessionStorage.getItem('cbt_current_user');
-    if (saved) return JSON.parse(saved);
-    // Cleanup any legacy localStorage user session
-    localStorage.removeItem('cbt_current_user');
+    // 1. Check persistent localStorage if user selected "Remember Me"
+    const persistent = localStorage.getItem('cbt_current_user');
+    if (persistent) return JSON.parse(persistent);
+
+    // 2. Check temporary sessionStorage
+    const session = sessionStorage.getItem('cbt_current_user');
+    if (session) return JSON.parse(session);
   } catch (e) {
     // ignore
   }
   return null;
 }
 
-export function saveStoredCurrentUser(user: AuthUser | null) {
+export function saveStoredCurrentUser(user: AuthUser | null, rememberMe: boolean = true) {
   try {
     if (user) {
-      sessionStorage.setItem('cbt_current_user', JSON.stringify(user));
+      if (rememberMe) {
+        localStorage.setItem('cbt_current_user', JSON.stringify(user));
+        sessionStorage.removeItem('cbt_current_user');
+      } else {
+        sessionStorage.setItem('cbt_current_user', JSON.stringify(user));
+        localStorage.removeItem('cbt_current_user');
+      }
     } else {
+      localStorage.removeItem('cbt_current_user');
       sessionStorage.removeItem('cbt_current_user');
     }
-    // Remove persistent localStorage user so user is required to re-login upon closing tab
-    localStorage.removeItem('cbt_current_user');
   } catch (e) {
     // ignore
   }

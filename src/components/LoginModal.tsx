@@ -32,7 +32,7 @@ interface LoginModalProps {
   teachers: Teacher[];
   students: Student[];
   currentUser: AuthUser | null;
-  onLogin: (user: AuthUser) => void;
+  onLogin: (user: AuthUser, rememberMe?: boolean) => void;
   onLogout: () => void;
   schoolProfile?: SchoolProfile;
 }
@@ -51,6 +51,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   const [usernameInput, setUsernameInput] = useState('');
   const [passwordInput, setPasswordInput] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [rememberMe, setRememberMe] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [searchAccountQuery, setSearchAccountQuery] = useState('');
@@ -207,7 +208,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         role: 'umum',
         name: 'Pengunjung Umum',
       };
-      onLogin(umumUser);
+      onLogin(umumUser, rememberMe);
       setSuccessMessage('Berhasil masuk sebagai Pengunjung Umum!');
       setTimeout(() => onClose(), 800);
       return;
@@ -245,7 +246,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           photoUrl: storedAdmin.photoUrl || '',
           birthDate: 'Admin',
         };
-        onLogin(adminUser);
+        onLogin(adminUser, rememberMe);
         setSuccessMessage(`Berhasil masuk sebagai ${storedAdmin.name}!`);
         setTimeout(() => onClose(), 800);
         return;
@@ -272,7 +273,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           birthDate: teacherMatch.birthDate,
           details: teacherMatch,
         };
-        onLogin(teacherUser);
+        onLogin(teacherUser, rememberMe);
         setSuccessMessage(`Berhasil masuk sebagai Guru (${teacherMatch.name})!`);
         setTimeout(() => onClose(), 800);
         return;
@@ -298,7 +299,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           birthDate: studentMatch.birthDate,
           details: studentMatch,
         };
-        onLogin(studentUser);
+        onLogin(studentUser, rememberMe);
         setSuccessMessage(`Berhasil masuk sebagai Siswa (${studentMatch.name})!`);
         setTimeout(() => onClose(), 800);
         return;
@@ -342,7 +343,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
             photoUrl: storedAdmin.photoUrl || '',
             birthDate: 'Admin',
           };
-          onLogin(adminUser);
+          onLogin(adminUser, rememberMe);
           setSuccessMessage(`Berhasil masuk sebagai ${storedAdmin.name}!`);
           setTimeout(() => onClose(), 800);
           return;
@@ -377,7 +378,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         birthDate: match.birthDate,
         details: match,
       };
-      onLogin(teacherUser);
+      onLogin(teacherUser, rememberMe);
       setSuccessMessage(`Selamat datang, ${match.name}! (Guru/Pengajar)`);
       setTimeout(() => onClose(), 800);
       return;
@@ -416,7 +417,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
             photoUrl: storedAdmin.photoUrl || '',
             birthDate: 'Admin',
           };
-          onLogin(adminUser);
+          onLogin(adminUser, rememberMe);
           setSuccessMessage(`Berhasil masuk sebagai ${storedAdmin.name}!`);
           setTimeout(() => onClose(), 800);
           return;
@@ -451,7 +452,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         birthDate: match.birthDate,
         details: match,
       };
-      onLogin(studentUser);
+      onLogin(studentUser, rememberMe);
       setSuccessMessage(`Selamat datang, ${match.name}! (Siswa)`);
       setTimeout(() => onClose(), 800);
       return;
@@ -943,6 +944,22 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                         {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                       </button>
                     </div>
+                  </div>
+
+                  {/* Remember Me / Ingat Saya Checkbox */}
+                  <div className="flex items-center justify-between pt-0.5 pb-1">
+                    <label className="flex items-center gap-2 cursor-pointer select-none text-xs font-semibold text-slate-300 hover:text-white">
+                      <input
+                        type="checkbox"
+                        checked={rememberMe}
+                        onChange={(e) => setRememberMe(e.target.checked)}
+                        className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-amber-400 focus:ring-amber-400 accent-amber-400 cursor-pointer"
+                      />
+                      <span className="text-[11px] sm:text-xs">Ingat Saya (Tetap Masuk Otomatis)</span>
+                    </label>
+                    <span className="text-[10px] text-slate-400 font-medium hidden sm:inline">
+                      Sesi tersimpan aman
+                    </span>
                   </div>
 
                   <button

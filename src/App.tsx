@@ -425,7 +425,7 @@ export default function App() {
     }
   }, [schoolProfile]);
 
-  const handleLogin = (user: AuthUser) => {
+  const handleLogin = (user: AuthUser, rememberMe: boolean = true) => {
     // Record login event in loginLogs & update lastLogin on user
     const now = new Date();
     const formattedTime = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
@@ -449,7 +449,7 @@ export default function App() {
     };
 
     setCurrentUser(updatedUser);
-    saveStoredCurrentUser(updatedUser);
+    saveStoredCurrentUser(updatedUser, rememberMe);
     setIsMobileMenuOpen(false);
 
     // Update teachers or students list to record lastLogin
