@@ -87,6 +87,7 @@ import {
   replaceNavigationState,
   HistoryStatePayload,
 } from './utils/navigationHistory';
+import { syncWebFaviconAndLogo } from './utils/logoSync';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
@@ -406,7 +407,7 @@ export default function App() {
     return () => clearInterval(heartbeatTimer);
   }, [currentUser]);
 
-  // Synchronize Favicon and Document Title with School Profile & Custom Logo
+  // Synchronize Favicon, Web App Icons, Meta Tags, and Document Title with School Profile & Custom Logo
   useEffect(() => {
     let name = schoolProfile?.name?.trim() || 'SDIT Al Hidayah Logam';
     if (name === 'SDIT AL HIDAYAH' || name === 'SDIT Al Hidayah' || name === 'SDIT AL HIDAYAH LOGAM') {
@@ -419,16 +420,7 @@ export default function App() {
       document.title = `CBT_${name}`;
     }
 
-    if (schoolProfile?.logoUrl) {
-      let link: HTMLLinkElement | null = document.querySelector("link[rel*='icon']");
-      if (!link) {
-        link = document.createElement('link');
-        link.rel = 'icon';
-        document.head.appendChild(link);
-      }
-      link.type = 'image/png';
-      link.href = schoolProfile.logoUrl;
-    }
+    syncWebFaviconAndLogo(schoolProfile?.logoUrl, name);
   }, [schoolProfile]);
 
   const handleLogin = (user: AuthUser, rememberMe: boolean = true) => {
@@ -818,7 +810,9 @@ export default function App() {
   const handleUpdateSchoolProfile = (updated: SchoolProfile) => {
     saveStoredSchoolProfile(updated);
     setSchoolProfile(updated);
+    syncWebFaviconAndLogo(updated.logoUrl, updated.name);
     saveAppDataToFirestore({ schoolProfile: updated });
+    broadcastAppDataChange({ schoolProfile: updated });
   };
 
   const handleResetAllData = async () => {

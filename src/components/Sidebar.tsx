@@ -137,13 +137,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className="h-16 flex items-center justify-between px-4 border-b border-slate-800">
           <div className="flex items-center gap-3 overflow-hidden">
             <div className="w-10 h-10 rounded-xl bg-slate-900 border border-slate-700/80 flex items-center justify-center shrink-0 shadow-lg shadow-indigo-500/10 overflow-hidden">
-              {schoolProfile?.logoUrl ? (
-                <img src={schoolProfile.logoUrl} alt="Logo Sekolah" className="w-full h-full object-contain p-0.5" />
-              ) : (
-                <div className="w-full h-full bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center">
-                  <BrainCircuit className="w-6 h-6 text-white" />
-                </div>
-              )}
+              <img
+                src={schoolProfile?.logoUrl || '/favicon.svg'}
+                alt="Logo Sekolah"
+                className="w-full h-full object-contain p-0.5"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).src = '/favicon.svg';
+                }}
+              />
             </div>
             <div className="flex flex-col">
               <span className="font-bold text-base tracking-wide leading-tight text-white">
