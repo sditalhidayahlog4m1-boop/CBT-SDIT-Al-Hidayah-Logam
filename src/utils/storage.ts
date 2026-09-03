@@ -197,6 +197,7 @@ export interface SchoolProfile {
 
 export const DEFAULT_SCHOOL_PROFILE: SchoolProfile = {
   name: 'SDIT Al Hidayah Logam',
+  logoUrl: '/favicon.svg',
   npsn: '20109876',
   nss: '102010109876',
   accreditation: 'A (Sangat Baik)',
@@ -231,7 +232,8 @@ export function getStoredSchoolProfile(): SchoolProfile {
       if (name === 'SDIT AL HIDAYAH' || name === 'SDIT Al Hidayah' || name === 'SDIT AL HIDAYAH LOGAM') {
         name = 'SDIT Al Hidayah Logam';
       }
-      return { ...DEFAULT_SCHOOL_PROFILE, ...parsed, name };
+      const logoUrl = parsed.logoUrl ? parsed.logoUrl : DEFAULT_SCHOOL_PROFILE.logoUrl;
+      return { ...DEFAULT_SCHOOL_PROFILE, ...parsed, name, logoUrl };
     }
   } catch (e) {
     // ignore

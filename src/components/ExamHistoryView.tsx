@@ -4,6 +4,7 @@ import { ExamResult, QuestionBank } from '../types';
 import { exportExamResultsExcel } from '../utils/exportImport';
 import { deleteExamResultFromFirestore } from '../utils/firebaseSync';
 import { ConfirmModal, ToastContainer, ToastMessage } from './NotificationModal';
+import { useHistoryModal } from '../utils/navigationHistory';
 
 interface ExamHistoryViewProps {
   results: ExamResult[];
@@ -19,6 +20,14 @@ export const ExamHistoryView: React.FC<ExamHistoryViewProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedSubject, setSelectedSubject] = useState<string>('ALL');
   const [selectedResult, setSelectedResult] = useState<ExamResult | null>(null);
+
+  // Synchronize Exam Result Detail modal with browser history
+  useHistoryModal({
+    modalId: 'exam-result-detail-modal',
+    isOpen: Boolean(selectedResult),
+    onClose: () => setSelectedResult(null),
+    tab: 'riwayat-ujian',
+  });
 
   // Get list of unique subjects from results
   const uniqueSubjects = Array.from(new Set(results.map((r) => r.subject.trim()))).filter(Boolean);

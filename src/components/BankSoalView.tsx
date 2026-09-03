@@ -5,6 +5,7 @@ import { normalizeQuestion } from '../utils/normalizeQuestion';
 import { exportBankToExcel } from '../utils/exportImport';
 import { ConfirmModal, ToastContainer, ToastMessage } from './NotificationModal';
 import { EditBankSoalModal } from './EditBankSoalModal';
+import { useHistoryModal } from '../utils/navigationHistory';
 
 interface BankSoalViewProps {
   banks: QuestionBank[];
@@ -19,6 +20,22 @@ export const BankSoalView: React.FC<BankSoalViewProps> = ({ banks, setBanks, set
   const [editingBank, setEditingBank] = useState<QuestionBank | null>(null);
   const [editingQuestionIndex, setEditingQuestionIndex] = useState<number>(0);
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
+
+  // Synchronize Preview Modal with browser history
+  useHistoryModal({
+    modalId: 'preview-bank-modal',
+    isOpen: Boolean(previewBank),
+    onClose: () => setPreviewBank(null),
+    tab: 'bank-soal',
+  });
+
+  // Synchronize Edit Bank & Soal Modal with browser history
+  useHistoryModal({
+    modalId: 'edit-bank-modal',
+    isOpen: Boolean(editingBank),
+    onClose: () => setEditingBank(null),
+    tab: 'bank-soal',
+  });
 
   // Collect unique subjects
   const uniqueSubjects = Array.from(new Set(banks.map((b) => b.subject)));

@@ -15,6 +15,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import { Teacher, Student, Subject, QuestionBank, ExamResult, ActiveTab } from '../types';
+import { useHistoryModal } from '../utils/navigationHistory';
 
 interface ResetDataViewProps {
   teachers: Teacher[];
@@ -39,6 +40,17 @@ export const ResetDataView: React.FC<ResetDataViewProps> = ({
   const [confirmInput, setConfirmInput] = useState('');
   const [isResetting, setIsResetting] = useState(false);
   const [resetSuccess, setResetSuccess] = useState(false);
+
+  // Synchronize Reset Confirmation Modal with browser history
+  useHistoryModal({
+    modalId: 'reset-confirm-modal',
+    isOpen: showConfirmModal,
+    onClose: () => {
+      setShowConfirmModal(false);
+      setConfirmInput('');
+    },
+    tab: 'reset-data',
+  });
 
   const totalQuestions = banks.reduce((acc, b) => acc + (b.questions?.length || 0), 0);
 

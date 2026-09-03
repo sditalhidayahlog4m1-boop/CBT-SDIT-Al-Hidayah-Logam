@@ -81,6 +81,13 @@ import {
 } from './utils/firebaseSync';
 import { subscribeToLocalSync, broadcastAppDataChange } from './utils/syncEngine';
 import { isDeepEqual } from './utils/deepEqual';
+import {
+  getCurrentHistoryState,
+  pushNavigationState,
+  replaceNavigationState,
+  HistoryStatePayload,
+} from './utils/navigationHistory';
+import { syncWebFaviconAndLogo } from './utils/logoSync';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
@@ -400,7 +407,7 @@ export default function App() {
     return () => clearInterval(heartbeatTimer);
   }, [currentUser]);
 
-  // Synchronize Favicon and Document Title with School Profile & Custom Logo
+  // Synchronize Favicon, Web App Icons, Meta Tags, and Document Title with School Profile & Custom Logo
   useEffect(() => {
     let name = schoolProfile?.name?.trim() || 'SDIT Al Hidayah Logam';
     if (name === 'SDIT AL HIDAYAH' || name === 'SDIT Al Hidayah' || name === 'SDIT AL HIDAYAH LOGAM') {
@@ -413,16 +420,7 @@ export default function App() {
       document.title = `CBT_${name}`;
     }
 
-    if (schoolProfile?.logoUrl) {
-      let link: HTMLLinkElement | null = document.querySelector("link[rel*='icon']");
-      if (!link) {
-        link = document.createElement('link');
-        link.rel = 'icon';
-        document.head.appendChild(link);
-      }
-      link.type = 'image/png';
-      link.href = schoolProfile.logoUrl;
-    }
+    syncWebFaviconAndLogo(schoolProfile?.logoUrl, name);
   }, [schoolProfile]);
 
   const handleLogin = (user: AuthUser, rememberMe: boolean = true) => {
@@ -661,8 +659,84 @@ export default function App() {
     });
   };
 
-  // Handler when student logs in to start exam
+  // 1. Masukkan Setiap Perubahan Tampilan ke dalam History (pushState runtut)
+  const handleNavigateTab = useCallback(
+    (action: React.SetStateAction<ActiveTab>) => {
+      setActiveTab((prev) => {
+        const next = typeof action === 'function' ? action(prev) : action;
+        const currentState = getCurrentHistoryState();
+
+        if (next !== prev || isMobileMenuOpen) {
+          const nextStep = (currentState?.step || 0) + 1;
+          pushNavigationState({
+            tab: next,
+            modal: null,
+            drawer: false,
+            exam: false,
+            step: nextStep,
+          });
+        }
+
+        if (isMobileMenuOpen) {
+          setIsMobileMenuOpen(false);
+        }
+        return next;
+      });
+    },
+    [isMobileMenuOpen]
+  );
+
+  const handleSetMobileMenuOpen = useCallback(
+    (action: React.SetStateAction<boolean>) => {
+      setIsMobileMenuOpen((prev) => {
+        const next = typeof action === 'function' ? action(prev) : action;
+        const currentState = getCurrentHistoryState();
+
+        if (next && !prev) {
+          pushNavigationState({
+            tab: activeTab,
+            modal: 'mobile-menu-drawer',
+            drawer: true,
+            exam: false,
+          });
+        } else if (!next && prev) {
+          if (currentState?.drawer || currentState?.modal === 'mobile-menu-drawer') {
+            window.history.back();
+          }
+        }
+        return next;
+      });
+    },
+    [activeTab]
+  );
+
+  const handleOpenLoginModal = useCallback(() => {
+    pushNavigationState({
+      tab: activeTab,
+      modal: 'login-modal',
+      drawer: false,
+      exam: false,
+    });
+    setIsLoginModalOpen(true);
+  }, [activeTab]);
+
+  const handleCloseLoginModal = useCallback(() => {
+    const currentState = getCurrentHistoryState();
+    if (currentState?.modal === 'login-modal') {
+      window.history.back();
+    } else {
+      setIsLoginModalOpen(false);
+    }
+  }, []);
+
+  // Handler when student logs in to start exam with history state
   const handleStartExam = (studentName: string, classRoom: string, bank: QuestionBank) => {
+    pushNavigationState({
+      tab: 'mulai-ujian',
+      modal: 'active-exam',
+      drawer: false,
+      exam: true,
+    });
     setActiveExam({ studentName, classRoom, bank });
   };
 
@@ -677,14 +751,68 @@ export default function App() {
   };
 
   const handleExitExam = () => {
+    const currentState = getCurrentHistoryState();
+    if (currentState?.exam || currentState?.modal === 'active-exam') {
+      window.history.back();
+    }
     setActiveExam(null);
-    setActiveTab('riwayat-ujian');
+    handleNavigateTab('riwayat-ujian');
   };
+
+  // 2. Tangani Event popstate Secara Sinkron (Runtut & Presisi)
+  useEffect(() => {
+    const current = getCurrentHistoryState();
+    if (!current || !current.tab) {
+      replaceNavigationState({
+        tab: activeTab,
+        modal: isLoginModalOpen ? 'login-modal' : null,
+        drawer: isMobileMenuOpen,
+        exam: Boolean(activeExam),
+        step: 0,
+      });
+    }
+
+    const handlePopState = (event: PopStateEvent) => {
+      const state = event.state as HistoryStatePayload | null;
+      if (state && state.tab) {
+        // Pulihkan halaman/tab aktif secara runtut
+        setActiveTab(state.tab);
+
+        // Pulihkan status drawer mobile
+        setIsMobileMenuOpen(Boolean(state.drawer));
+
+        // Pulihkan modal login jika pengguna sudah login
+        if (state.modal === 'login-modal') {
+          setIsLoginModalOpen(true);
+        } else if (!state.modal && isLoginModalOpen && currentUser) {
+          setIsLoginModalOpen(false);
+        }
+
+        // Pulihkan sesi ujian jika navigasi kembali
+        if (!state.exam && activeExam) {
+          setActiveExam(null);
+        }
+      } else {
+        // Jika kembali ke titik awal (root history)
+        setActiveTab('dashboard');
+        setIsMobileMenuOpen(false);
+        if (currentUser) {
+          setIsLoginModalOpen(false);
+        }
+        setActiveExam(null);
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [activeExam, currentUser, isLoginModalOpen, isMobileMenuOpen, activeTab]);
 
   const handleUpdateSchoolProfile = (updated: SchoolProfile) => {
     saveStoredSchoolProfile(updated);
     setSchoolProfile(updated);
+    syncWebFaviconAndLogo(updated.logoUrl, updated.name);
     saveAppDataToFirestore({ schoolProfile: updated });
+    broadcastAppDataChange({ schoolProfile: updated });
   };
 
   const handleResetAllData = async () => {
@@ -719,13 +847,13 @@ export default function App() {
       {/* Sidebar / Mobile Drawer */}
       <Sidebar
         activeTab={activeTab}
-        setActiveTab={setActiveTab}
+        setActiveTab={handleNavigateTab}
         collapsed={sidebarCollapsed}
         setCollapsed={setSidebarCollapsed}
         isMobileMenuOpen={isMobileMenuOpen}
-        setIsMobileMenuOpen={setIsMobileMenuOpen}
+        setIsMobileMenuOpen={handleSetMobileMenuOpen}
         currentUser={currentUser}
-        onOpenLoginModal={() => setIsLoginModalOpen(true)}
+        onOpenLoginModal={handleOpenLoginModal}
         rolePermissions={rolePermissions}
         schoolProfile={schoolProfile}
       />
@@ -735,11 +863,11 @@ export default function App() {
         {/* Header */}
         <Header
           activeTab={activeTab}
-          setActiveTab={setActiveTab}
+          setActiveTab={handleNavigateTab}
           isMobileMenuOpen={isMobileMenuOpen}
-          setIsMobileMenuOpen={setIsMobileMenuOpen}
+          setIsMobileMenuOpen={handleSetMobileMenuOpen}
           currentUser={currentUser}
-          onOpenLoginModal={() => setIsLoginModalOpen(true)}
+          onOpenLoginModal={handleOpenLoginModal}
           schoolProfile={schoolProfile}
         />
 
@@ -754,9 +882,9 @@ export default function App() {
               results={results}
               gameLogs={gameLogs}
               loginLogs={loginLogs}
-              setActiveTab={setActiveTab}
+              setActiveTab={handleNavigateTab}
               currentUser={currentUser}
-              onOpenLoginModal={() => setIsLoginModalOpen(true)}
+              onOpenLoginModal={handleOpenLoginModal}
             />
           )}
 
@@ -768,7 +896,7 @@ export default function App() {
               setTeachers={setTeachers}
               students={students}
               setStudents={setStudents}
-              onOpenLoginModal={() => setIsLoginModalOpen(true)}
+              onOpenLoginModal={handleOpenLoginModal}
             />
           )}
 
@@ -809,7 +937,7 @@ export default function App() {
           {activeTab === 'pembuat-soal-ai' && (
             <AiQuestionGeneratorView
               onSaveBank={handleSaveBank}
-              setActiveTab={setActiveTab}
+              setActiveTab={handleNavigateTab}
               currentUser={currentUser}
               teachers={teachers}
               subjects={subjects}
@@ -844,7 +972,7 @@ export default function App() {
           {activeTab === 'ekstrak-dokumen' && (
             <EkstrakDokumenView
               onSaveBank={handleSaveBank}
-              setActiveTab={setActiveTab}
+              setActiveTab={handleNavigateTab}
               teachers={teachers}
               subjects={subjects}
               students={students}
@@ -855,7 +983,7 @@ export default function App() {
           {activeTab === 'upload-soal' && (
             <UploadSoalView
               onSaveBank={handleSaveBank}
-              setActiveTab={setActiveTab}
+              setActiveTab={handleNavigateTab}
               teachers={teachers}
               subjects={subjects}
               students={students}
@@ -864,7 +992,7 @@ export default function App() {
           )}
 
           {activeTab === 'bank-soal' && (
-            <BankSoalView banks={banks} setBanks={setBanks} setActiveTab={setActiveTab} />
+            <BankSoalView banks={banks} setBanks={setBanks} setActiveTab={handleNavigateTab} />
           )}
 
           {activeTab === 'kumpulan-jawaban' && <KumpulanJawabanView banks={banks} />}
@@ -888,7 +1016,7 @@ export default function App() {
               rolePermissions={rolePermissions}
               setRolePermissions={setRolePermissions}
               currentUser={currentUser}
-              onOpenLoginModal={() => setIsLoginModalOpen(true)}
+              onOpenLoginModal={handleOpenLoginModal}
             />
           )}
 
@@ -900,7 +1028,7 @@ export default function App() {
               banks={banks}
               results={results}
               onResetAllData={handleResetAllData}
-              setActiveTab={setActiveTab}
+              setActiveTab={handleNavigateTab}
             />
           )}
         </main>
@@ -908,7 +1036,7 @@ export default function App() {
         {/* Modal Login System */}
         <LoginModal
           isOpen={isLoginModalOpen}
-          onClose={() => setIsLoginModalOpen(false)}
+          onClose={handleCloseLoginModal}
           teachers={teachers}
           students={students}
           currentUser={currentUser}
@@ -920,12 +1048,12 @@ export default function App() {
         {/* Mobile Bottom Navigation Bar */}
         <MobileBottomNav
           activeTab={activeTab}
-          setActiveTab={setActiveTab}
-          onToggleMobileMenu={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+          setActiveTab={handleNavigateTab}
+          onToggleMobileMenu={() => handleSetMobileMenuOpen(!isMobileMenuOpen)}
           isMobileMenuOpen={isMobileMenuOpen}
           currentUser={currentUser}
           rolePermissions={rolePermissions}
-          onOpenLoginModal={() => setIsLoginModalOpen(true)}
+          onOpenLoginModal={handleOpenLoginModal}
         />
       </div>
     </div>

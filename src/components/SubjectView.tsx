@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Plus, Edit2, Trash2, Search, BookOpen } from 'lucide-react';
 import { Subject } from '../types';
 import { ConfirmModal, ToastContainer, ToastMessage } from './NotificationModal';
+import { useHistoryModal } from '../utils/navigationHistory';
 
 interface SubjectViewProps {
   subjects: Subject[];
@@ -12,6 +13,14 @@ export const SubjectView: React.FC<SubjectViewProps> = ({ subjects, setSubjects 
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+
+  // Synchronize Add/Edit Mapel modal with browser history
+  useHistoryModal({
+    modalId: 'subject-form-modal',
+    isOpen: isModalOpen,
+    onClose: () => setIsModalOpen(false),
+    tab: 'mata-pelajaran',
+  });
 
   const [formData, setFormData] = useState({
     code: '',

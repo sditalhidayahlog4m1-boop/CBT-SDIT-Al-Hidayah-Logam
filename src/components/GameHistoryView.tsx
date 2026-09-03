@@ -26,6 +26,7 @@ import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
 import { GameHistoryLog, AuthUser } from '../types';
 import { getStoredGameLogs } from '../utils/storage';
+import { useHistoryModal } from '../utils/navigationHistory';
 
 interface GameHistoryViewProps {
   gameLogs: GameHistoryLog[];
@@ -50,6 +51,14 @@ export const GameHistoryView: React.FC<GameHistoryViewProps> = ({
   const [selectedSubject, setSelectedSubject] = useState('Semua');
   const [selectedDifficulty, setSelectedDifficulty] = useState('Semua');
   const [showConfirmResetModal, setShowConfirmResetModal] = useState(false);
+
+  // Synchronize Reset Confirmation Modal with browser history
+  useHistoryModal({
+    modalId: 'game-history-reset-modal',
+    isOpen: showConfirmResetModal,
+    onClose: () => setShowConfirmResetModal(false),
+    tab: 'riwayat-game',
+  });
   const [activeTabFilter, setActiveTabFilter] = useState<'semua' | 'saya'>('semua');
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [itemsPerPage, setItemsPerPage] = useState<number>(10);

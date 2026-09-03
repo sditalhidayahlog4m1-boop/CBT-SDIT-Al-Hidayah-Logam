@@ -169,11 +169,16 @@ export const Header: React.FC<HeaderProps> = ({
           )}
         </button>
 
-        {schoolProfile?.logoUrl && (
-          <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-slate-900 border border-slate-700/80 flex items-center justify-center overflow-hidden shrink-0 shadow-md">
-            <img src={schoolProfile.logoUrl} alt="Logo Sekolah" className="w-full h-full object-contain p-0.5" />
-          </div>
-        )}
+        <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-slate-900 border border-slate-700/80 flex items-center justify-center overflow-hidden shrink-0 shadow-md">
+          <img
+            src={schoolProfile?.logoUrl || '/favicon.svg'}
+            alt="Logo Sekolah"
+            className="w-full h-full object-contain p-0.5"
+            onError={(e) => {
+              (e.target as HTMLImageElement).src = '/favicon.svg';
+            }}
+          />
+        </div>
 
         <div className="min-w-0">
           <h1 className="text-xs sm:text-sm md:text-base font-bold text-slate-100 tracking-tight flex items-center gap-1.5 truncate">

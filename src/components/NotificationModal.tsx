@@ -1,5 +1,6 @@
 import React from 'react';
 import { AlertTriangle, Trash2, CheckCircle2, XCircle, Info, X } from 'lucide-react';
+import { useHistoryModal } from '../utils/navigationHistory';
 
 export interface ConfirmModalProps {
   isOpen: boolean;
@@ -22,6 +23,12 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
   onConfirm,
   onCancel,
 }) => {
+  useHistoryModal({
+    modalId: 'confirm-dialog',
+    isOpen,
+    onClose: onCancel,
+  });
+
   if (!isOpen) return null;
 
   return (

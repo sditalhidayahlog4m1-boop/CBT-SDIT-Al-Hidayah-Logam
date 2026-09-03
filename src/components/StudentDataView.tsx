@@ -4,6 +4,7 @@ import { Student, UserLoginLog } from '../types';
 import { downloadSiswaTemplate } from '../utils/exportImport';
 import * as XLSX from 'xlsx';
 import { ConfirmModal, ToastContainer, ToastMessage } from './NotificationModal';
+import { useHistoryModal } from '../utils/navigationHistory';
 
 // Helper to convert Excel date numbers / JS Date / ISO strings into DD/MM/YYYY format
 function parseExcelDateValue(val: any): string {
@@ -58,6 +59,14 @@ export const StudentDataView: React.FC<StudentDataViewProps> = ({ students, setS
   const [filterStatus, setFilterStatus] = useState('Semua');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+
+  // Synchronize Add/Edit Student modal with browser history
+  useHistoryModal({
+    modalId: 'student-form-modal',
+    isOpen: isModalOpen,
+    onClose: () => setIsModalOpen(false),
+    tab: 'data-siswa',
+  });
 
   const [formData, setFormData] = useState<Omit<Student, 'id'>>({
     nis: '',

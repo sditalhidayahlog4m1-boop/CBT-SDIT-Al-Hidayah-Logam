@@ -11,9 +11,11 @@ import {
   RotateCcw,
   ListOrdered,
   X,
+  LogOut,
 } from 'lucide-react';
 import { QuestionBank, ExamResult } from '../types';
 import { normalizeQuestion } from '../utils/normalizeQuestion';
+import { useHistoryModal } from '../utils/navigationHistory';
 
 interface ExamScreenProps {
   studentName: string;
@@ -49,8 +51,69 @@ export const ExamScreen: React.FC<ExamScreenProps> = ({
     waitSeconds: number;
   } | null>(null);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [showExitConfirmModal, setShowExitConfirmModal] = useState(false);
   const [isExamCompleted, setIsExamCompleted] = useState(false);
   const [finalResult, setFinalResult] = useState<ExamResult | null>(null);
+
+  // Synchronize Mobile Palette drawer with browser history
+  useHistoryModal({
+    modalId: 'exam-mobile-palette-modal',
+    isOpen: showMobilePalette,
+    onClose: () => setShowMobilePalette(false),
+    tab: 'mulai-ujian',
+  });
+
+  // Synchronize Minimum Duration Warning modal with browser history
+  useHistoryModal({
+    modalId: 'exam-min-duration-modal',
+    isOpen: showMinDurationModal,
+    onClose: () => setShowMinDurationModal(false),
+    tab: 'mulai-ujian',
+  });
+
+  // Synchronize Unanswered Warning modal with browser history
+  useHistoryModal({
+    modalId: 'exam-unanswered-modal',
+    isOpen: showUnansweredModal,
+    onClose: () => setShowUnansweredModal(false),
+    tab: 'mulai-ujian',
+  });
+
+  // Synchronize Success Finish modal with browser history
+  useHistoryModal({
+    modalId: 'exam-success-modal',
+    isOpen: showSuccessModal,
+    onClose: () => setShowSuccessModal(false),
+    tab: 'mulai-ujian',
+  });
+
+  // Synchronize Exit Confirmation modal with browser history
+  useHistoryModal({
+    modalId: 'exam-exit-confirm-modal',
+    isOpen: showExitConfirmModal,
+    onClose: () => setShowExitConfirmModal(false),
+    tab: 'mulai-ujian',
+  });
+
+  // Intercept back button while exam is actively in progress to prevent accidental exit
+  useEffect(() => {
+    if (isExamCompleted) return;
+
+    const handleExamPopState = (e: PopStateEvent) => {
+      // If user pressed back beyond exam session while exam is active
+      if (!e.state || !e.state.exam) {
+        // Re-push exam state to protect session and display confirmation modal
+        window.history.pushState(
+          { tab: 'mulai-ujian', exam: true, modal: 'exam-exit-confirm-modal' },
+          ''
+        );
+        setShowExitConfirmModal(true);
+      }
+    };
+
+    window.addEventListener('popstate', handleExamPopState);
+    return () => window.removeEventListener('popstate', handleExamPopState);
+  }, [isExamCompleted]);
 
   // Auto-save exam progress to LocalStorage for offline reliability
   useEffect(() => {
@@ -281,6 +344,14 @@ export const ExamScreen: React.FC<ExamScreenProps> = ({
           >
             <CheckCircle2 className="w-4 h-4" />
             <span className="hidden xs:inline">Selesai Ujian</span>
+          </button>
+
+          <button
+            onClick={() => setShowExitConfirmModal(true)}
+            className="p-2 bg-slate-900 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 rounded-xl border border-slate-800 hover:border-rose-500/30 transition cursor-pointer"
+            title="Keluar Sesi Ujian"
+          >
+            <LogOut className="w-4 h-4" />
           </button>
         </div>
       </header>
@@ -627,6 +698,46 @@ export const ExamScreen: React.FC<ExamScreenProps> = ({
                 className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs shadow-lg shadow-emerald-600/30 transition-all cursor-pointer"
               >
                 OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* EXIT EXAM CONFIRMATION MODAL */}
+      {showExitConfirmModal && (
+        <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="bg-[#0f172a] rounded-3xl max-w-md w-full p-6 sm:p-7 shadow-2xl space-y-4 border border-rose-500/30 text-center">
+            <div className="w-14 h-14 rounded-2xl bg-rose-500/10 text-rose-400 border border-rose-500/30 flex items-center justify-center mx-auto shadow-inner">
+              <AlertTriangle className="w-7 h-7" />
+            </div>
+
+            <div className="space-y-2">
+              <h3 className="text-lg font-black text-slate-100">
+                Keluar dari Sesi Ujian?
+              </h3>
+              <p className="text-xs text-slate-300 leading-relaxed">
+                Jawaban Anda telah tersimpan secara otomatis di memori perangkat. Apakah Anda yakin ingin menghentikan sesi ujian ini?
+              </p>
+            </div>
+
+            <div className="pt-2 flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setShowExitConfirmModal(false)}
+                className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold rounded-xl text-xs border border-slate-700 transition-all cursor-pointer"
+              >
+                Lanjutkan Ujian
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowExitConfirmModal(false);
+                  onExitExam();
+                }}
+                className="flex-1 py-3 bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white font-bold rounded-xl text-xs shadow-lg shadow-rose-600/20 transition-all cursor-pointer"
+              >
+                Ya, Keluar
               </button>
             </div>
           </div>
