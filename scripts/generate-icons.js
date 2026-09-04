@@ -1,4 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+import fs from 'fs';
+import path from 'path';
+import sharp from 'sharp';
+
+// 1. Create Authentic, Pristine SDIT Al Hidayah Logam SVG (No dark/black shield, perfect contrast and safe zones)
+const svgContent = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
   <defs>
     <!-- Rich Islamic Emerald Gradients -->
     <linearGradient id="emeraldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
@@ -134,4 +139,60 @@
       <polygon points="422,200 425,208 433,208 427,213 429,221 422,216 415,221 417,213 411,208 419,208" transform="scale(0.8) translate(105, 50)" />
     </g>
   </g>
-</svg>
+</svg>`;
+
+// 2. Create Maskable Version (with full emerald solid background to satisfy Android adaptive icon standard without white/black borders)
+const svgMaskableContent = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <rect width="512" height="512" fill="#047857" />
+  <g transform="scale(0.82) translate(56, 56)">
+    ${svgContent.replace('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">', '').replace('</svg>', '')}
+  </g>
+</svg>`;
+
+async function buildIcons() {
+  const publicDir = path.resolve('public');
+
+  // 1. Write favicon.svg
+  fs.writeFileSync(path.join(publicDir, 'favicon.svg'), svgContent, 'utf-8');
+  console.log('Successfully wrote public/favicon.svg');
+
+  // 2. Generate icon-192.png (transparent background)
+  await sharp(Buffer.from(svgContent))
+    .resize(192, 192)
+    .png({ compressionLevel: 9 })
+    .toFile(path.join(publicDir, 'icon-192.png'));
+  console.log('Successfully generated public/icon-192.png');
+
+  // 3. Generate icon-512.png (transparent background)
+  await sharp(Buffer.from(svgContent))
+    .resize(512, 512)
+    .png({ compressionLevel: 9 })
+    .toFile(path.join(publicDir, 'icon-512.png'));
+  console.log('Successfully generated public/icon-512.png');
+
+  // 4. Generate icon-maskable-192.png (with safe margin for Android adaptive icons)
+  await sharp(Buffer.from(svgMaskableContent))
+    .resize(192, 192)
+    .png({ compressionLevel: 9 })
+    .toFile(path.join(publicDir, 'icon-maskable-192.png'));
+  console.log('Successfully generated public/icon-maskable-192.png');
+
+  // 5. Generate icon-maskable-512.png (with safe margin for Android adaptive icons)
+  await sharp(Buffer.from(svgMaskableContent))
+    .resize(512, 512)
+    .png({ compressionLevel: 9 })
+    .toFile(path.join(publicDir, 'icon-maskable-512.png'));
+  console.log('Successfully generated public/icon-maskable-512.png');
+
+  // 6. Generate apple-touch-icon.png (180x180)
+  await sharp(Buffer.from(svgMaskableContent))
+    .resize(180, 180)
+    .png({ compressionLevel: 9 })
+    .toFile(path.join(publicDir, 'apple-touch-icon.png'));
+  console.log('Successfully generated public/apple-touch-icon.png');
+}
+
+buildIcons().catch((err) => {
+  console.error('Error generating icons:', err);
+  process.exit(1);
+});

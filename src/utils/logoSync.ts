@@ -101,21 +101,73 @@ export function syncWebFaviconAndLogo(logoUrl?: string | null, schoolName?: stri
     document.head.appendChild(appleLink);
   }
 
-  // 4. Update or create OpenGraph Image Meta Tag
+  // 4. Update Web App Manifest dynamically for Android / Mobile PWA installation
+  try {
+    const appTitle = schoolName || 'CBT_SDIT Al Hidayah Logam';
+    const shortTitle = schoolName ? schoolName.slice(0, 20) : 'SDIT Al Hidayah';
+    
+    // Choose primary icons for manifest
+    const iconList = targetLogo === DEFAULT_SCHOOL_LOGO
+      ? [
+          { src: '/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+          { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+          { src: '/icon-maskable-192.png', sizes: '192x192', type: 'image/png', purpose: 'maskable' },
+          { src: '/icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+          { src: '/favicon.svg', sizes: '512x512', type: 'image/svg+xml', purpose: 'any' },
+        ]
+      : [
+          { src: targetLogo, sizes: '512x512', type: mimeType, purpose: 'any' },
+          { src: targetLogo, sizes: '192x192', type: mimeType, purpose: 'any' },
+          { src: '/icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+        ];
+
+    const dynamicManifest = {
+      name: appTitle,
+      short_name: shortTitle,
+      description: 'Sistem CBT (Computer-Based Test) modern berbasis web dengan dukungan online/offline.',
+      start_url: '/',
+      display: 'standalone',
+      background_color: '#020617',
+      theme_color: '#047857',
+      icons: iconList,
+    };
+
+    const manifestBlob = new Blob([JSON.stringify(dynamicManifest, null, 2)], {
+      type: 'application/manifest+json',
+    });
+    const manifestBlobUrl = URL.createObjectURL(manifestBlob);
+
+    let manifestLink = (document.getElementById('app-manifest') ||
+      document.querySelector("link[rel='manifest']")) as HTMLLinkElement | null;
+    if (manifestLink) {
+      manifestLink.id = 'app-manifest';
+      manifestLink.href = manifestBlobUrl;
+    } else {
+      manifestLink = document.createElement('link');
+      manifestLink.id = 'app-manifest';
+      manifestLink.rel = 'manifest';
+      manifestLink.href = manifestBlobUrl;
+      document.head.appendChild(manifestLink);
+    }
+  } catch (manifestErr) {
+    console.warn('Could not dynamically update webmanifest:', manifestErr);
+  }
+
+  // 5. Update or create OpenGraph Image Meta Tag
   let ogImageMeta = document.querySelector("meta[property='og:image']") as HTMLMetaElement | null;
   if (!ogImageMeta) {
     ogImageMeta = document.createElement('meta');
     ogImageMeta.setAttribute('property', 'og:image');
     document.head.appendChild(ogImageMeta);
   }
-  ogImageMeta.content = targetLogo;
+  ogImageMeta.content = targetLogo === DEFAULT_SCHOOL_LOGO ? '/icon-512.png' : targetLogo;
 
-  // 5. Update or create Twitter Image Meta Tag
+  // 6. Update or create Twitter Image Meta Tag
   let twImageMeta = document.querySelector("meta[name='twitter:image']") as HTMLMetaElement | null;
   if (!twImageMeta) {
     twImageMeta = document.createElement('meta');
     twImageMeta.setAttribute('name', 'twitter:image');
     document.head.appendChild(twImageMeta);
   }
-  twImageMeta.content = targetLogo;
+  twImageMeta.content = targetLogo === DEFAULT_SCHOOL_LOGO ? '/icon-512.png' : targetLogo;
 }
