@@ -32,7 +32,7 @@ import {
 } from 'lucide-react';
 import { AuthUser, Teacher, Student, Subject } from '../types';
 import { SchoolProfile, getStoredSchoolProfile, saveStoredSchoolProfile } from '../utils/storage';
-import { compressImage } from '../utils/imageCompressor';
+import { compressImage, detectBlackBackground, makeImageTransparent } from '../utils/imageCompressor';
 import {
   DEFAULT_SCHOOL_LOGO,
   isValidLogoUrl,
@@ -65,6 +65,9 @@ export const ProfilSekolahView: React.FC<ProfilSekolahViewProps> = ({
   const [logoUrlInput, setLogoUrlInput] = useState<string>(profile.logoUrl || DEFAULT_SCHOOL_LOGO);
   const [isApplyingUrl, setIsApplyingUrl] = useState<boolean>(false);
   const [copiedUrl, setCopiedUrl] = useState<boolean>(false);
+  const [isBlackBgDetected, setIsBlackBgDetected] = useState<boolean>(false);
+  const [isCleaningBg, setIsCleaningBg] = useState<boolean>(false);
+  const [previewBgMode, setPreviewBgMode] = useState<'checkerboard' | 'dark' | 'light'>('checkerboard');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -83,6 +86,17 @@ export const ProfilSekolahView: React.FC<ProfilSekolahViewProps> = ({
       }
     }
   }, [schoolProfile]);
+
+  // Detect if current logo has an opaque black background
+  useEffect(() => {
+    if (profile.logoUrl && !profile.logoUrl.endsWith('.svg')) {
+      detectBlackBackground(profile.logoUrl).then((hasBlack) => {
+        setIsBlackBgDetected(hasBlack);
+      });
+    } else {
+      setIsBlackBgDetected(false);
+    }
+  }, [profile.logoUrl]);
 
   const isAdminOrGuru = currentUser?.role === 'admin' || currentUser?.role === 'guru';
 
@@ -167,6 +181,29 @@ export const ProfilSekolahView: React.FC<ProfilSekolahViewProps> = ({
     setTimeout(() => setCopiedUrl(false), 2500);
   };
 
+  const handleMakeLogoTransparent = async () => {
+    if (!profile.logoUrl) return;
+    setIsCleaningBg(true);
+    try {
+      const transparentLogo = await makeImageTransparent(profile.logoUrl, 42);
+      const updated = { ...profile, logoUrl: transparentLogo };
+      setProfile(updated);
+      setEditForm((prev) => ({ ...prev, logoUrl: transparentLogo }));
+      saveStoredSchoolProfile(updated);
+      syncWebFaviconAndLogo(transparentLogo, updated.name);
+      if (onUpdateSchoolProfile) {
+        onUpdateSchoolProfile(updated);
+      }
+      setIsBlackBgDetected(false);
+      setSuccessMessage('Latar belakang hitam berhasil dihapus! Logo kini berlatar transparan murni dan telah disinkronkan ke Web Favicon & Header.');
+      setTimeout(() => setSuccessMessage(null), 4000);
+    } catch (err) {
+      console.warn('Gagal mengubah latar hitam menjadi transparan:', err);
+    } finally {
+      setIsCleaningBg(false);
+    }
+  };
+
   const handleLogoFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -177,16 +214,25 @@ export const ProfilSekolahView: React.FC<ProfilSekolahViewProps> = ({
     }
 
     try {
-      const compressedLogo = await compressImage(file, 256, 256, 0.85);
-      const updated = { ...profile, logoUrl: compressedLogo };
+      // 1. Compress image with full alpha transparency preservation (PNG format)
+      let processedLogo = await compressImage(file, 256, 256, 0.9, true);
+
+      // 2. If the uploaded image has opaque black borders, auto-clean it to transparent!
+      const hasBlackBg = await detectBlackBackground(processedLogo, 35);
+      if (hasBlackBg) {
+        processedLogo = await makeImageTransparent(processedLogo, 42);
+      }
+
+      const updated = { ...profile, logoUrl: processedLogo };
       setProfile(updated);
-      setEditForm((prev) => ({ ...prev, logoUrl: compressedLogo }));
+      setEditForm((prev) => ({ ...prev, logoUrl: processedLogo }));
       saveStoredSchoolProfile(updated);
-      syncWebFaviconAndLogo(compressedLogo, updated.name);
+      syncWebFaviconAndLogo(processedLogo, updated.name);
       if (onUpdateSchoolProfile) {
         onUpdateSchoolProfile(updated);
       }
-      setSuccessMessage('Logo sekolah berhasil diunggah & tersinkronisasi ke Favicon Browser & seluruh halaman!');
+      setIsBlackBgDetected(false);
+      setSuccessMessage('Logo sekolah berhasil diunggah dengan latar transparan & disinkronkan ke Favicon Browser!');
       setTimeout(() => setSuccessMessage(null), 4000);
     } catch (err) {
       console.warn('Error uploading logo:', err);
@@ -238,14 +284,19 @@ export const ProfilSekolahView: React.FC<ProfilSekolahViewProps> = ({
       <div className="relative overflow-hidden bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl">
         <div className="relative z-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
           <div className="flex items-start sm:items-center gap-4 sm:gap-6">
-            <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-gradient-to-br from-indigo-600 to-purple-600 p-0.5 shadow-xl shrink-0 flex items-center justify-center overflow-hidden">
-              <div className="w-full h-full bg-slate-950/80 rounded-[14px] flex items-center justify-center border border-white/10 overflow-hidden">
-                {profile.logoUrl ? (
-                  <img src={profile.logoUrl} alt="Logo Sekolah" className="w-full h-full object-contain p-1" />
-                ) : (
-                  <School className="w-9 h-9 sm:w-11 sm:h-11 text-amber-400" />
-                )}
-              </div>
+            <div className="w-16 h-16 sm:w-20 sm:h-20 shrink-0 flex items-center justify-center">
+              {profile.logoUrl ? (
+                <img
+                  src={profile.logoUrl}
+                  alt="Logo Sekolah"
+                  className="w-full h-full object-contain filter drop-shadow-xl"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).src = DEFAULT_SCHOOL_LOGO;
+                  }}
+                />
+              ) : (
+                <School className="w-12 h-12 sm:w-16 sm:h-16 text-amber-400" />
+              )}
             </div>
 
             <div className="space-y-1.5">
@@ -354,32 +405,106 @@ export const ProfilSekolahView: React.FC<ProfilSekolahViewProps> = ({
         </div>
 
         <div className="flex flex-col md:flex-row items-center md:items-start gap-6 pt-1">
-          {/* Preview Box */}
-          <div className="w-36 h-36 rounded-2xl bg-slate-950 border-2 border-dashed border-indigo-500/40 flex flex-col items-center justify-center relative overflow-hidden group shadow-inner shrink-0 p-2">
-            {profile.logoUrl ? (
-              <img
-                src={profile.logoUrl}
-                alt="Preview Logo Sekolah"
-                className="w-full h-full object-contain drop-shadow-md"
-                onError={(e) => {
-                  (e.target as HTMLElement).style.display = 'none';
-                }}
-              />
-            ) : (
-              <div className="text-center p-3">
-                <School className="w-10 h-10 text-slate-600 mx-auto mb-1.5" />
-                <span className="text-[11px] font-semibold text-slate-400 block leading-tight">
-                  Belum Ada Logo
-                </span>
+          {/* Preview Box with transparent backdrop selector */}
+          <div className="flex flex-col items-center gap-2 shrink-0">
+            <div
+              className={`w-36 h-36 rounded-2xl border-2 border-dashed border-indigo-500/40 flex flex-col items-center justify-center relative overflow-hidden group shadow-lg p-2 transition-colors ${
+                previewBgMode === 'checkerboard'
+                  ? 'bg-[linear-gradient(45deg,#334155_25%,transparent_25%),linear-gradient(-45deg,#334155_25%,transparent_25%),linear-gradient(45deg,transparent_75%,#334155_75%),linear-gradient(-45deg,transparent_75%,#334155_75%)] bg-[size:16px_16px] bg-[#1e293b]'
+                  : previewBgMode === 'light'
+                  ? 'bg-slate-100'
+                  : 'bg-slate-950'
+              }`}
+            >
+              {profile.logoUrl ? (
+                <img
+                  src={profile.logoUrl}
+                  alt="Preview Logo Sekolah"
+                  className="w-full h-full object-contain filter drop-shadow-md"
+                  onError={(e) => {
+                    (e.target as HTMLElement).style.display = 'none';
+                  }}
+                />
+              ) : (
+                <div className="text-center p-3">
+                  <School className="w-10 h-10 text-slate-600 mx-auto mb-1.5" />
+                  <span className="text-[11px] font-semibold text-slate-400 block leading-tight">
+                    Belum Ada Logo
+                  </span>
+                </div>
+              )}
+              <div className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded bg-slate-900/90 text-[9px] font-mono text-slate-300 border border-slate-700">
+                {previewBgMode === 'checkerboard' ? 'Transparan' : previewBgMode === 'light' ? 'Terang' : 'Gelap'}
               </div>
-            )}
-            <div className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded bg-slate-900/90 text-[9px] font-mono text-slate-400 border border-slate-700">
-              Live Preview
+            </div>
+
+            {/* Preview Backdrop Switcher */}
+            <div className="flex items-center gap-1 bg-slate-900/90 p-1 rounded-lg border border-slate-800 text-[10px]">
+              <span className="text-slate-400 px-1 font-medium">Latar:</span>
+              <button
+                type="button"
+                onClick={() => setPreviewBgMode('checkerboard')}
+                className={`px-2 py-0.5 rounded transition-all cursor-pointer ${
+                  previewBgMode === 'checkerboard'
+                    ? 'bg-indigo-600 text-white font-bold'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+                title="Latar transparan kotak-kotak"
+              >
+                Transparan
+              </button>
+              <button
+                type="button"
+                onClick={() => setPreviewBgMode('dark')}
+                className={`px-2 py-0.5 rounded transition-all cursor-pointer ${
+                  previewBgMode === 'dark'
+                    ? 'bg-indigo-600 text-white font-bold'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+                title="Latar gelap"
+              >
+                Gelap
+              </button>
+              <button
+                type="button"
+                onClick={() => setPreviewBgMode('light')}
+                className={`px-2 py-0.5 rounded transition-all cursor-pointer ${
+                  previewBgMode === 'light'
+                    ? 'bg-indigo-600 text-white font-bold'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+                title="Latar terang"
+              >
+                Terang
+              </button>
             </div>
           </div>
 
           {/* Action Panels based on Tab */}
           <div className="flex-1 space-y-4 text-xs text-slate-300 w-full">
+            {/* OPAQUE BLACK BACKGROUND DETECTED NOTICE */}
+            {isBlackBgDetected && (
+              <div className="p-3.5 bg-amber-500/10 border border-amber-500/40 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-amber-300 text-xs">
+                <div className="flex items-center gap-2.5">
+                  <Sparkles className="w-5 h-5 text-amber-400 shrink-0 animate-bounce" />
+                  <div>
+                    <span className="font-bold block text-amber-300">Terdeteksi Latar Belakang Hitam:</span>
+                    <span className="text-[11px] text-amber-200/90">
+                      Logo memiliki latar belakang kotak hitam di sekelilingnya. Klik tombol di kanan untuk langsung membersihkannya menjadi transparan murni.
+                    </span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleMakeLogoTransparent}
+                  disabled={isCleaningBg}
+                  className="px-3.5 py-2 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-bold rounded-xl text-xs shrink-0 cursor-pointer shadow-md flex items-center gap-1.5 transition-all"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-slate-950" />
+                  <span>{isCleaningBg ? 'Membersihkan...' : 'Jadikan Transparan Sekarang'}</span>
+                </button>
+              </div>
+            )}
             {isAdminOrGuru ? (
               <>
                 {logoInputMode === 'url' ? (
@@ -498,6 +623,19 @@ export const ProfilSekolahView: React.FC<ProfilSekolahViewProps> = ({
                         <ExternalLink className="w-3.5 h-3.5" />
                         <span>Buka URL</span>
                       </a>
+                    )}
+
+                    {profile.logoUrl && (
+                      <button
+                        type="button"
+                        onClick={handleMakeLogoTransparent}
+                        disabled={isCleaningBg}
+                        className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-indigo-300 hover:text-indigo-200 border border-slate-700 hover:border-indigo-500/50 rounded-xl text-[11px] font-semibold flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+                        title="Hapus latar belakang hitam dari gambar logo agar transparan murni"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+                        <span>{isCleaningBg ? 'Membersihkan...' : 'Hapus Latar Hitam (Transparan)'}</span>
+                      </button>
                     )}
                   </div>
 
@@ -654,12 +792,12 @@ export const ProfilSekolahView: React.FC<ProfilSekolahViewProps> = ({
             <form onSubmit={handleSave} className="space-y-5 text-xs">
               {/* LOGO URL & PREVIEW FIELD */}
               <div className="bg-slate-950/70 p-3.5 rounded-2xl border border-slate-800 flex flex-col sm:flex-row items-start sm:items-center gap-3">
-                <div className="w-14 h-14 rounded-xl bg-slate-900 border border-slate-700 flex items-center justify-center shrink-0 overflow-hidden shadow-inner p-1">
+                <div className="w-14 h-14 rounded-xl bg-[linear-gradient(45deg,#334155_25%,transparent_25%),linear-gradient(-45deg,#334155_25%,transparent_25%),linear-gradient(45deg,transparent_75%,#334155_75%),linear-gradient(-45deg,transparent_75%,#334155_75%)] bg-[size:10px_10px] bg-[#1e293b] border border-slate-700 flex items-center justify-center shrink-0 overflow-hidden shadow-inner p-1">
                   {editForm.logoUrl ? (
                     <img
                       src={editForm.logoUrl}
                       alt="Logo Sekolah"
-                      className="w-full h-full object-contain"
+                      className="w-full h-full object-contain filter drop-shadow-sm"
                       onError={(e) => {
                         (e.target as HTMLElement).style.display = 'none';
                       }}

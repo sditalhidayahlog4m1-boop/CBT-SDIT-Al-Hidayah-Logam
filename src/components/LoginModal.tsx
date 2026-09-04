@@ -566,11 +566,11 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         {/* TOP YELLOW ACCENT BANNER & HEADER (CENTER ALIGNED) */}
         <div className="bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-500 text-slate-950 p-3.5 sm:p-4 relative shadow-md">
           <div className="flex flex-col items-center justify-center text-center relative z-10 px-4">
-            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-slate-950 text-amber-400 flex items-center justify-center shadow-md border border-amber-300/40 shrink-0 overflow-hidden mb-1.5">
+            <div className="w-12 h-12 sm:w-14 sm:h-14 flex items-center justify-center shrink-0 mb-1.5">
               <img
                 src={schoolProfile?.logoUrl || '/favicon.svg'}
                 alt="Logo Sekolah"
-                className="w-full h-full object-contain p-0.5"
+                className="w-full h-full object-contain filter drop-shadow-md"
                 onError={(e) => {
                   (e.target as HTMLImageElement).src = '/favicon.svg';
                 }}
