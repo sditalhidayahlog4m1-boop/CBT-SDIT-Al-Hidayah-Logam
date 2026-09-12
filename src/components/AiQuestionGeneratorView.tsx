@@ -25,6 +25,7 @@ import {
   getStoredStudents,
   getStoredBanks,
 } from '../utils/storage';
+import { ToastContainer, ToastMessage } from './NotificationModal';
 
 interface AiQuestionGeneratorViewProps {
   onSaveBank: (bank: QuestionBank) => void;
@@ -166,6 +167,28 @@ export const AiQuestionGeneratorView: React.FC<AiQuestionGeneratorViewProps> = (
   const [minWorkingMinutes, setMinWorkingMinutes] = useState(30);
   const [copied, setCopied] = useState(false);
 
+  // Toast and Batch Progress State
+  const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const [batchProgress, setBatchProgress] = useState<{
+    currentBatch: number;
+    totalBatches: number;
+    completedQuestions: number;
+    totalTarget: number;
+    currentRangeText: string;
+  } | null>(null);
+
+  const addToast = (type: 'success' | 'error' | 'warning' | 'info', message: string, title?: string) => {
+    const id = 'toast-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6);
+    setToasts((prev) => [...prev, { id, type, title, message }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 4500);
+  };
+
+  const dismissToast = (id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  };
+
   // Validate number-only for totalQuestions input
   const handleTotalQuestionsChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
@@ -187,60 +210,157 @@ export const AiQuestionGeneratorView: React.FC<AiQuestionGeneratorViewProps> = (
 
     const numQuestions = parseInt(totalQuestionsText, 10);
     if (!totalQuestionsText || isNaN(numQuestions) || numQuestions <= 0) {
-      setErrorMessage('Jumlah soal harus berupa angka positif.');
+      const msg = 'Jumlah soal harus berupa angka positif.';
+      setErrorMessage(msg);
+      addToast('warning', msg, 'Validasi Input');
       return;
     }
 
     if (!subject.trim()) {
-      setErrorMessage('Mata Pelajaran wajib diisi.');
+      const msg = 'Mata Pelajaran wajib diisi.';
+      setErrorMessage(msg);
+      addToast('warning', msg, 'Validasi Input');
       return;
     }
 
     if (!gradeLevel.trim()) {
-      setErrorMessage('Jenjang Pendidikan wajib diisi.');
+      const msg = 'Jenjang Pendidikan wajib diisi.';
+      setErrorMessage(msg);
+      addToast('warning', msg, 'Validasi Input');
       return;
     }
 
     if (!topic.trim()) {
-      setErrorMessage('Materi / Topik soal wajib diisi.');
+      const msg = 'Materi / Topik soal wajib diisi.';
+      setErrorMessage(msg);
+      addToast('warning', msg, 'Validasi Input');
       return;
     }
 
     setIsLoading(true);
 
+    const BATCH_SIZE = 5;
+    const totalBatches = numQuestions > BATCH_SIZE ? Math.ceil(numQuestions / BATCH_SIZE) : 1;
+    const accumulatedQuestions: any[] = [];
+
     try {
-      const response = await fetch('/api/generate-questions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          teacherName,
-          subject,
-          gradeLevel,
-          classRoom,
-          totalQuestions: numQuestions,
-          topic,
-          difficulty,
-        }),
-      });
+      for (let b = 0; b < totalBatches; b++) {
+        const startNum = b * BATCH_SIZE + 1;
+        const currentBatchSize = Math.min(BATCH_SIZE, numQuestions - b * BATCH_SIZE);
+        const endNum = startNum + currentBatchSize - 1;
 
-      const resData = await response.json();
+        setBatchProgress({
+          currentBatch: b + 1,
+          totalBatches,
+          completedQuestions: accumulatedQuestions.length,
+          totalTarget: numQuestions,
+          currentRangeText: totalBatches > 1 ? `Soal no ${startNum} - ${endNum}` : `${numQuestions} butir soal`,
+        });
 
-      if (!response.ok || !resData.success) {
-        throw new Error(resData.error || 'Terjadi kesalahan saat generate soal dari Gemini AI.');
+        const response = await fetch('/api/generate-questions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            teacherName,
+            subject,
+            gradeLevel,
+            classRoom,
+            totalQuestions: currentBatchSize,
+            startQuestionNumber: startNum,
+            batchIndex: b + 1,
+            batchTotal: totalBatches,
+            topic,
+            difficulty,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error(`Server error (HTTP ${response.status})`);
+        }
+
+        const resData = await response.json();
+
+        if (!resData.success) {
+          throw new Error(resData.error || 'Terjadi kesalahan saat generate soal dari Gemini AI.');
+        }
+
+        let rawBatchQuestions = resData.data?.questions || resData.data?.items || [];
+        if (typeof rawBatchQuestions === 'string') {
+          try {
+            const cleanJson = rawBatchQuestions.replace(/```json/g, '').replace(/```/g, '').trim();
+            rawBatchQuestions = JSON.parse(cleanJson);
+          } catch {
+            rawBatchQuestions = [];
+          }
+        }
+
+        if (Array.isArray(rawBatchQuestions) && rawBatchQuestions.length > 0) {
+          accumulatedQuestions.push(...rawBatchQuestions);
+        }
       }
 
-      setGeneratedData(resData.data);
+      if (accumulatedQuestions.length === 0) {
+        throw new Error('Tidak ada soal yang berhasil dibuat oleh AI.');
+      }
+
+      const finalQuestions = accumulatedQuestions.map((q, idx) => ({
+        ...q,
+        question_number: idx + 1,
+      }));
+
+      const fullResult = {
+        cbt_metadata: {
+          teacher_name: teacherName || 'Guru Mata Pelajaran',
+          subject,
+          grade_level: gradeLevel,
+          difficulty,
+          total_questions: finalQuestions.length,
+        },
+        questions: finalQuestions,
+      };
+
+      setGeneratedData(fullResult);
       try {
-        localStorage.setItem('cbt_ai_generated_questions_draft', JSON.stringify(resData.data));
+        localStorage.setItem('cbt_ai_generated_questions_draft', JSON.stringify(fullResult));
       } catch {
         // ignore
       }
+
       // Auto refresh token
       setExamToken('CBT' + Math.floor(1000 + Math.random() * 9000));
-    } catch (err: any) {
-      setErrorMessage(err.message || 'Gagal terhubung ke AI Service.');
+      addToast(
+        'success',
+        `Berhasil membuat ${finalQuestions.length} butir soal CBT siap pakai${totalBatches > 1 ? ` melalui ${totalBatches} batch otomatis` : ''}.`,
+        'Soal AI Berhasil Dibuat'
+      );
+    } catch (error: any) {
+      console.error('Gagal generate soal AI:', error);
+      const userFacingMsg = 'AI sedang sibuk atau respons terputus. Silakan coba buat per 5 soal terlebih dahulu.';
+      addToast('error', userFacingMsg, 'Gagal Generate Soal AI');
+      setErrorMessage(userFacingMsg);
+
+      // Save partial questions if any batch succeeded
+      if (accumulatedQuestions.length > 0) {
+        const partialResult = {
+          cbt_metadata: {
+            teacher_name: teacherName || 'Guru Mata Pelajaran',
+            subject,
+            grade_level: gradeLevel,
+            difficulty,
+            total_questions: accumulatedQuestions.length,
+          },
+          questions: accumulatedQuestions.map((q, idx) => ({ ...q, question_number: idx + 1 })),
+        };
+        setGeneratedData(partialResult);
+        addToast(
+          'warning',
+          `Tersimpan ${accumulatedQuestions.length} butir soal dari batch yang berhasil diproses sebelum gangguan.`,
+          'Hasil Sebagian Tersimpan'
+        );
+      }
     } finally {
       setIsLoading(false);
+      setBatchProgress(null);
     }
   };
 
@@ -692,14 +812,50 @@ export const AiQuestionGeneratorView: React.FC<AiQuestionGeneratorViewProps> = (
             onChange={(e) => setTopic(e.target.value)}
             className="w-full px-3.5 py-2.5 bg-slate-800/80 border border-slate-700 text-slate-100 placeholder-slate-500 rounded-xl text-xs focus:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all font-medium leading-relaxed"
           />
+
+          {/* Tips Guru untuk cakupan prompt */}
+          <div className="mt-2.5 p-3 bg-indigo-950/40 border border-indigo-500/20 rounded-xl text-slate-300 text-xs flex items-start gap-2.5">
+            <Sparkles className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
+            <div className="leading-relaxed">
+              <span className="font-semibold text-indigo-300">💡 Tips Guru untuk Hasil Cepat & Akurat:</span> Untuk materi yang luas, buat topik lebih spesifik (misal: per surat, bab khusus, atau beberapa ayat saja) agar AI merespons lebih cepat dan mendalam. Untuk jumlah 15–30 butir soal, sistem otomatis memproses dalam batch per 5 butir soal secara bertahap agar AI terhindar dari timeout.
+            </div>
+          </div>
         </div>
+
+        {/* Batch Progress Bar during Loading */}
+        {isLoading && batchProgress && (
+          <div className="p-4 bg-indigo-950/80 border border-indigo-500/40 rounded-xl space-y-2.5 animate-in fade-in">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-bold text-indigo-200 flex items-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
+                {batchProgress.totalBatches > 1
+                  ? `Memproses Batch ${batchProgress.currentBatch} dari ${batchProgress.totalBatches} (${batchProgress.currentRangeText})...`
+                  : `AI sedang menyusun soal, opsi jawaban, dan pembahasan...`}
+              </span>
+              <span className="font-mono text-indigo-300 font-bold bg-indigo-900/60 px-2 py-0.5 rounded border border-indigo-700/50 text-[11px]">
+                {batchProgress.completedQuestions} / {batchProgress.totalTarget} Butir
+              </span>
+            </div>
+            <div className="w-full bg-slate-800 rounded-full h-2.5 overflow-hidden border border-slate-700/60">
+              <div
+                className="bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 h-2.5 rounded-full transition-all duration-300"
+                style={{
+                  width: `${Math.max(8, Math.min(100, Math.round((batchProgress.completedQuestions / batchProgress.totalTarget) * 100)))}%`,
+                }}
+              />
+            </div>
+            <p className="text-[11px] text-slate-400 leading-normal">
+              Diproses per 5 soal dengan sanitasi schema strict JSON agar AI terhindar dari pemutusan koneksi atau respons terputus.
+            </p>
+          </div>
+        )}
 
         {/* Error Alert */}
         {errorMessage && (
           <div className="p-4 bg-rose-500/10 border border-rose-500/20 text-rose-300 rounded-xl text-xs flex items-start gap-2.5">
             <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
             <div>
-              <span className="font-bold">Gagal Generate Soal:</span> {errorMessage}
+              <span className="font-bold">Informasi:</span> {errorMessage}
             </div>
           </div>
         )}
@@ -714,7 +870,11 @@ export const AiQuestionGeneratorView: React.FC<AiQuestionGeneratorViewProps> = (
             {isLoading ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin text-white" />
-                <span>Memproses Gemini AI... (Sabar sejenak)</span>
+                <span>
+                  {batchProgress && batchProgress.totalBatches > 1
+                    ? `Membuat Batch ${batchProgress.currentBatch}/${batchProgress.totalBatches}...`
+                    : `Memproses Gemini AI...`}
+                </span>
               </>
             ) : (
               <>
@@ -866,6 +1026,9 @@ export const AiQuestionGeneratorView: React.FC<AiQuestionGeneratorViewProps> = (
           </div>
         </div>
       )}
+
+      {/* Toast Notifications */}
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 };

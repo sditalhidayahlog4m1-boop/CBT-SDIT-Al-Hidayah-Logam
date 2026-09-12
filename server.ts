@@ -691,10 +691,71 @@ async function startServer() {
     };
   }
 
+  // Robust JSON Sanitizer to safely clean Markdown blocks, backticks, control chars, and parse
+  function robustJsonSanitizer<T = any>(rawText: string | undefined | null): T | null {
+    if (!rawText || typeof rawText !== "string") return null;
+
+    // 1. Bersihkan format Markdown (```json dan ```) serta spasi
+    let cleanJson = rawText
+      .replace(/```json/gi, "")
+      .replace(/```/g, "")
+      .trim();
+
+    // 2. Bersihkan UTF-8 Byte Order Mark (BOM)
+    if (cleanJson.charCodeAt(0) === 0xfeff) {
+      cleanJson = cleanJson.slice(1);
+    }
+
+    // 3. Cari batas JSON valid (kurung kurawal atau kurung siku terluar)
+    const firstBrace = cleanJson.indexOf("{");
+    const firstBracket = cleanJson.indexOf("[");
+    let startIdx = -1;
+    if (firstBrace !== -1 && firstBracket !== -1) {
+      startIdx = Math.min(firstBrace, firstBracket);
+    } else if (firstBrace !== -1) {
+      startIdx = firstBrace;
+    } else {
+      startIdx = firstBracket;
+    }
+
+    if (startIdx !== -1) {
+      const isObj = cleanJson[startIdx] === "{";
+      const lastEnd = isObj ? cleanJson.lastIndexOf("}") : cleanJson.lastIndexOf("]");
+      if (lastEnd > startIdx) {
+        cleanJson = cleanJson.slice(startIdx, lastEnd + 1);
+      }
+    }
+
+    // 4. Parse dengan JSON.parse() dengan proteksi karakter ilegal
+    try {
+      return JSON.parse(cleanJson) as T;
+    } catch {
+      try {
+        // Hapus karakter kontrol ilegal (ASCII 0-31 kecuali \t, \r, \n)
+        const stripped = cleanJson.replace(/[\x00-\x09\x0B\x0C\x0E-\x1F\x7F]/g, "");
+        return JSON.parse(stripped) as T;
+      } catch (err2) {
+        console.warn("[robustJsonSanitizer] Gagal parse JSON:", err2);
+        return null;
+      }
+    }
+  }
+
   // API Endpoint for generating CBT questions using Gemini AI
   app.post("/api/generate-questions", async (req, res) => {
     try {
-      const { teacherName, subject, gradeLevel, classRoom, totalQuestions, topic, difficulty } = req.body;
+      const {
+        teacherName,
+        subject,
+        gradeLevel,
+        classRoom,
+        totalQuestions,
+        topic,
+        difficulty,
+        startQuestionNumber,
+        batchIndex,
+        batchTotal,
+      } = req.body;
 
       if (!subject || !gradeLevel || !topic) {
         return res.status(400).json({
@@ -704,11 +765,18 @@ async function startServer() {
 
       const selectedDifficulty = (difficulty === "Mudah" || difficulty === "Sulit") ? difficulty : "Sedang";
       const numQuestions = Math.max(1, Math.min(100, parseInt(totalQuestions, 10) || 5));
+      const startNum = parseInt(startQuestionNumber, 10) || 1;
       const apiKey = process.env.GEMINI_API_KEY;
 
       if (!apiKey) {
         console.warn("GEMINI_API_KEY tidak ada. Menggunakan generator cerdas internal.");
         const fallbackData = generateDynamicFallbackQuestions(subject, gradeLevel, topic, numQuestions, teacherName, selectedDifficulty);
+        if (startNum > 1 && Array.isArray(fallbackData.questions)) {
+          fallbackData.questions = fallbackData.questions.map((q: any, idx: number) => ({
+            ...q,
+            question_number: startNum + idx,
+          }));
+        }
         return res.json({
           success: true,
           isFallback: true,
@@ -775,6 +843,7 @@ async function startServer() {
         required: ["cbt_metadata", "questions"],
       };
 
+      const batchInfo = batchTotal && batchTotal > 1 ? ` (Batch ${batchIndex || 1} dari ${batchTotal}, nomor urut ${startNum} sampai ${startNum + numQuestions - 1})` : "";
       const prompt = `Anda adalah pakar pembuat soal ujian CBT (Computer-Based Test) sekolah di Indonesia.
 Buatkan ${numQuestions} butir soal pilihan ganda berkualitas tinggi, orisinil, dan sangat mendidik berdasarkan parameter berikut:
 - Nama Guru: ${teacherName || "Guru Mata Pelajaran"}
@@ -782,8 +851,13 @@ Buatkan ${numQuestions} butir soal pilihan ganda berkualitas tinggi, orisinil, d
 - Jenjang Pendidikan: ${gradeLevel} (SD / MI / SMP / MTs / SMA / MA / SMK)
 - Kelas: ${classRoom || "-"}
 - Tingkat Kesulitan: ${selectedDifficulty}
-- Jumlah Soal: ${numQuestions} butir
+- Jumlah Soal dalam batch ini: ${numQuestions} butir${batchInfo}
+- Nomor Awal Soal: ${startNum}
 - Materi / Topik Soal: "${topic}"
+
+PANDUAN CAKUPAN TOPIK:
+- Kurangi cakupan yang terlalu luas agar respons cepat dan mendalam. Fokuskan pada pokok bahasan, sub-bab, ayat, atau indikator inti dari "${topic}".
+- Pastikan nomor butir soal pada "question_number" dimulai berurutan dari ${startNum} sampai ${startNum + numQuestions - 1}.
 
 MATRIKS SINKRONISASI TINGKATAN / JENJANG PENDIDIKAN & KESULITAN (WAJIB DITERAPKAN DENGAN KETAT):
 1. JIKA TINGKAT KESULITAN = "Mudah" (Untuk Jenjang ${gradeLevel}):
@@ -807,8 +881,8 @@ ATURAN STRUKTUR & KUALITAS SOAL (SANGAT KETAT & WAJIB DIPATUHI):
    - Jika mata pelajaran adalah Mapel Umum (Matematika, IPA, Bahasa Indonesia, Bahasa Inggris, IPS, PKn, PJOK, dll.): DILARANG KERAS menyisipkan teks Arab, ayat Al-Qur'an, atau nama surat.
 4. PEMBAHASAN: Sertakan uraian penjelasan singkat, mendidik, dan informatif pada field "explanation".`;
 
-      // Official supported Gemini models in high-availability order
-      const candidateModels = ["gemini-3.1-flash-lite", "gemini-flash-latest", "gemini-3.7-flash"];
+      // Official supported Gemini models prioritizing gemini-2.5-flash with JSON mode
+      const candidateModels = ["gemini-2.5-flash", "gemini-3.1-flash-lite", "gemini-flash-latest", "gemini-3.8-flash"];
       let parsedData: any = null;
 
       for (const model of candidateModels) {
@@ -819,17 +893,11 @@ ATURAN STRUKTUR & KUALITAS SOAL (SANGAT KETAT & WAJIB DIPATUHI):
             config: {
               responseMimeType: "application/json",
               responseSchema: cbtResponseSchema,
-              temperature: 0.7,
+              temperature: 0.3, // Menjaga AI agar fokus pada format baku
             },
           });
           if (response && response.text) {
-            let cleanedJson = response.text.trim();
-            if (cleanedJson.startsWith("```json")) {
-              cleanedJson = cleanedJson.replace(/^```json/, "").replace(/```$/, "").trim();
-            } else if (cleanedJson.startsWith("```")) {
-              cleanedJson = cleanedJson.replace(/^```/, "").replace(/```$/, "").trim();
-            }
-            parsedData = JSON.parse(cleanedJson);
+            parsedData = robustJsonSanitizer(response.text);
             if (parsedData && Array.isArray(parsedData.questions) && parsedData.questions.length > 0) {
               break;
             }
@@ -839,8 +907,22 @@ ATURAN STRUKTUR & KUALITAS SOAL (SANGAT KETAT & WAJIB DIPATUHI):
         }
       }
 
+      if (parsedData && Array.isArray(parsedData.questions)) {
+        // Ensure sequential question numbers start from startNum
+        parsedData.questions = parsedData.questions.map((q: any, idx: number) => ({
+          ...q,
+          question_number: startNum + idx,
+        }));
+      }
+
       if (!parsedData) {
         const fallbackData = generateDynamicFallbackQuestions(subject, gradeLevel, topic, numQuestions, teacherName, selectedDifficulty);
+        if (startNum > 1 && Array.isArray(fallbackData.questions)) {
+          fallbackData.questions = fallbackData.questions.map((q: any, idx: number) => ({
+            ...q,
+            question_number: startNum + idx,
+          }));
+        }
         return res.json({
           success: true,
           isFallback: true,
@@ -992,7 +1074,12 @@ PETUNJUK FORMAT SPESIFIK SESUAI TIPE GAME:
 - Jika gameType = "melengkapi-ayat": Soal melengkapi kata/lafaz yang rumpang (...) pada "${surahOrTopic}".
 - Jika gameType = "tebak-surat": Soal menebak nama surat dari potongan ayat/terjemahan "${surahOrTopic}".
 - Jika gameType = "tebak-nomor-ayat": Soal menebak urutan nomor ayat dari surat "${surahOrTopic}".
-- Jika gameType = "tebak-audio": Soal audio bacaan ayat Al-Qur'an untuk ditebak surat/maknanya. WAJIB MENGISI "surah_number", "ayah_number", "arabic_text" (lafaz ayat lengkap), "translation" (arti ayat), dan "audio_text" (lafaz ayat Arab). Pastikan "prompt_text" menanyakan isi/arti/surat ayat yang dilantunkan, dan "correct_answer" 100% SINKRON dengan ayat tersebut.
+- Jika gameType = "tebak-audio": Soal audio bacaan ayat Al-Qur'an untuk ditebak surat/maknanya.
+  * WAJIB MENGISI "arabic_text" DENGAN LAFAZ AYAT AL-QUR'AN ASLI BERBAHASA ARAB LENGKAP DENGAN HARAKAT/TASYKIL (contoh: "قُلْ أَعُوذُ بِرَبِّ الْفَلَقِ").
+  * WAJIB MENGISI "audio_text" SAMA PERSIS DENGAN "arabic_text" (lafaz ayat Arab asli yang akan dilantunkan Qari/Audio). DILARANG KERAS MENGISI "audio_text" DENGAN KALIMAT BAHASA INDONESIA ATAU PERTANYAAN SOAL!
+  * WAJIB MENGISI "surah_number" (angka nomor surat 1-114) dan "ayah_number" (angka nomor ayat).
+  * "prompt_text" HANYA BERISI PERTANYAAN KUIS (contoh: "Dengarkan lantunan ayat suci Al-Qur'an berikut! Surat apakah dan ayat ke berapakah yang dibacakan tersebut?").
+  * "correct_answer" WAJIB 100% SINKRON dengan ayat tersebut.
 - Jika gameType = "puzzle-ayat": Field "puzzle_pieces" (kata acak) dan "correct_order" (urutan benar) dari ayat "${surahOrTopic}".
 - Jika gameType = "memory-card": Pasangan kartu Arab & Terjemahan dari "${surahOrTopic}".
 - Jika gameType = "ular-tangga-islami": Soal kuis tantangan singkat dan menarik tentang "${surahOrTopic}".`;
@@ -1034,8 +1121,8 @@ PETUNJUK FORMAT SPESIFIK BERDASARKAN TIPE GAME UNTUK MAPEL UMUM:
 - Jika gameType = "ular-tangga-islami" (Ular Tangga Edukasi): Soal tantangan interaktif seputar "${surahOrTopic}".`;
       }
 
-      // Official supported Gemini models in high-availability order
-      const candidateModels = ["gemini-3.1-flash-lite", "gemini-flash-latest", "gemini-3.7-flash"];
+      // Official supported Gemini models prioritizing gemini-2.5-flash with JSON mode
+      const candidateModels = ["gemini-2.5-flash", "gemini-3.1-flash-lite", "gemini-flash-latest", "gemini-3.8-flash"];
       let parsedData: any = null;
 
       for (const model of candidateModels) {
@@ -1046,17 +1133,11 @@ PETUNJUK FORMAT SPESIFIK BERDASARKAN TIPE GAME UNTUK MAPEL UMUM:
             config: {
               responseMimeType: "application/json",
               responseSchema: gameResponseSchema,
-              temperature: 0.7,
+              temperature: 0.3, // Menjaga AI agar fokus pada format baku
             },
           });
           if (response && response.text) {
-            let cleanedJson = response.text.trim();
-            if (cleanedJson.startsWith("```json")) {
-              cleanedJson = cleanedJson.replace(/^```json/, "").replace(/```$/, "").trim();
-            } else if (cleanedJson.startsWith("```")) {
-              cleanedJson = cleanedJson.replace(/^```/, "").replace(/```$/, "").trim();
-            }
-            parsedData = JSON.parse(cleanedJson);
+            parsedData = robustJsonSanitizer(response.text);
             if (parsedData && Array.isArray(parsedData.items) && parsedData.items.length > 0) {
               break;
             }
@@ -1072,6 +1153,41 @@ PETUNJUK FORMAT SPESIFIK BERDASARKAN TIPE GAME UNTUK MAPEL UMUM:
           success: true,
           isFallback: true,
           data: fallbackGame,
+        });
+      }
+
+      if (parsedData && Array.isArray(parsedData.items)) {
+        parsedData.items = parsedData.items.map((item: any, idx: number) => {
+          if (isIslamicSubject || item.category === 'tebak-audio' || gameType === 'tebak-audio') {
+            const hasArabicInAr = item.arabic_text && /[\u0600-\u06FF]/.test(item.arabic_text);
+            const hasArabicInAudio = item.audio_text && /[\u0600-\u06FF]/.test(item.audio_text);
+
+            // Jika lafaz Arab belum ada atau audio_text berisi bahasa Indonesia/soal
+            if (!hasArabicInAr || !hasArabicInAudio || !item.surah_number) {
+              const matchedSurah = findQuranSurah(item.surah_name || surahOrTopic || item.prompt_text || '');
+              const verseIdx = idx % matchedSurah.verses.length;
+              const verseObj = matchedSurah.verses[verseIdx] || matchedSurah.verses[0];
+
+              if (!hasArabicInAr) {
+                item.arabic_text = verseObj.ar;
+              }
+              if (!hasArabicInAudio || (item.audio_text && (item.audio_text.toLowerCase().includes('dengar') || item.audio_text.toLowerCase().includes('soal')))) {
+                item.audio_text = item.arabic_text || verseObj.ar;
+              }
+              if (!item.surah_number) {
+                item.surah_number = matchedSurah.surahNum;
+              }
+              if (!item.ayah_number) {
+                item.ayah_number = verseObj.ayah;
+              }
+              if (!item.translation && verseObj.id) {
+                item.translation = verseObj.id;
+              }
+            } else if (hasArabicInAr && (!item.audio_text || !hasArabicInAudio)) {
+              item.audio_text = item.arabic_text;
+            }
+          }
+          return item;
         });
       }
 

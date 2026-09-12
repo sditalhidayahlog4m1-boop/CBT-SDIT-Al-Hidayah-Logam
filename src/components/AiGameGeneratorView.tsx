@@ -47,6 +47,12 @@ import {
   Info,
 } from 'lucide-react';
 import { parseRawDocumentText } from './ManualQuestionBuilder';
+import {
+  QURAN_VERSES_DB,
+  findQuranSurah,
+  resolveSpecificVerse,
+  isIslamicQuestion,
+} from '../utils/quranData';
 
 export type GameMode =
   | 'pilihan-ganda'
@@ -121,81 +127,26 @@ export function getBestIndonesianVoice(): SpeechSynthesisVoice | null {
 
 export function resolveQuranAudioUrl(item: GameItem, qariId = 'alafasy'): string | null {
   if (item.audio_url) return item.audio_url;
+  if (qariId === 'tts_indonesia') return null;
 
   let surahNum = item.surah_number;
   let ayahNum = item.ayah_number || 1;
 
   if (!surahNum) {
-    const textToSearch = `${item.surah_name || ''} ${item.prompt_text || ''} ${item.correct_answer || ''} ${(item.options || []).join(' ')}`;
-    const lower = textToSearch.toLowerCase();
-
-    // Check for "surah X ayat Y" or "X:Y" format
-    const verseMatch = lower.match(/(?:surah|surat)\s*([a-z'\s\-]+)?\s*ayat\s*(\d+)/i) || lower.match(/(\d{1,3})\s*:\s*(\d{1,3})/);
-    if (verseMatch && verseMatch[2]) {
-      ayahNum = parseInt(verseMatch[2], 10) || 1;
+    const textToSearch = `${item.surah_name || ''} ${item.prompt_text || ''} ${item.correct_answer || ''} ${(item.options || []).join(' ')} ${item.arabic_text || ''}`;
+    const resolved = resolveSpecificVerse(undefined, undefined, textToSearch);
+    if (resolved) {
+      surahNum = resolved.surah.surahNum;
+      ayahNum = resolved.verse.ayah;
     }
-
-    if (lower.includes('ikhlas')) surahNum = 112;
-    else if (lower.includes('falaq')) surahNum = 113;
-    else if (lower.includes('nasr')) surahNum = 110;
-    else if (lower.includes('nas') || lower.includes('an-nas')) surahNum = 114;
-    else if (lower.includes('fatihah')) surahNum = 1;
-    else if (lower.includes('kawthar') || lower.includes('kausar')) surahNum = 108;
-    else if (lower.includes('fil') || lower.includes('al-fil')) surahNum = 105;
-    else if (lower.includes('kafirun')) surahNum = 109;
-    else if (lower.includes('ma\'un') || lower.includes('maun')) surahNum = 107;
-    else if (lower.includes('qadr')) surahNum = 97;
-    else if (lower.includes('asr')) surahNum = 103;
-    else if (lower.includes('quraysh') || lower.includes('quraisy')) surahNum = 106;
-    else if (lower.includes('lahab') || lower.includes('masad')) surahNum = 111;
-    else if (lower.includes('humazah')) surahNum = 104;
-    else if (lower.includes('takathur') || lower.includes('takasur')) surahNum = 102;
-    else if (lower.includes('qariah') || lower.includes('qari\'ah')) surahNum = 101;
-    else if (lower.includes('adiyat')) surahNum = 100;
-    else if (lower.includes('zalzalah')) surahNum = 99;
-    else if (lower.includes('bayyinah')) surahNum = 98;
-    else if (lower.includes('tin')) surahNum = 95;
-    else if (lower.includes('inshirah') || lower.includes('syarh')) surahNum = 94;
-    else if (lower.includes('duha')) surahNum = 93;
-    else if (lower.includes('balad')) surahNum = 90;
-    else if (lower.includes('shams') || lower.includes('syams')) surahNum = 91;
-    else if (lower.includes('ala') || lower.includes('a\'la')) surahNum = 87;
-    else if (lower.includes('ghashiyah')) surahNum = 88;
-    else if (lower.includes('baqarah') || lower.includes('bakarah')) surahNum = 2;
-    else if (lower.includes('ali imran') || lower.includes('imran')) surahNum = 3;
-    else if (lower.includes('yasin') || lower.includes('yaseen')) surahNum = 36;
-    else if (lower.includes('mulk')) surahNum = 67;
-    else if (lower.includes('kahf') || lower.includes('kahfi')) surahNum = 18;
-    else if (lower.includes('rahman')) surahNum = 55;
-    else if (lower.includes('waqiah') || lower.includes('waqi\'ah')) surahNum = 56;
-    else if (lower.includes('naba')) surahNum = 78;
-    else if (lower.includes('nazi\'at') || lower.includes('naziat')) surahNum = 79;
-    else if (lower.includes('abasa')) surahNum = 80;
-    else if (lower.includes('takwir')) surahNum = 81;
-    else if (lower.includes('infitar')) surahNum = 82;
-    else if (lower.includes('mutaffifin')) surahNum = 83;
-    else if (lower.includes('inshiqaq')) surahNum = 84;
-    else if (lower.includes('buruj')) surahNum = 85;
-    else if (lower.includes('tariq')) surahNum = 86;
-    else if (lower.includes('fajr')) surahNum = 89;
-    else if (lower.includes('layl') || lower.includes('lail')) surahNum = 92;
   }
 
-  if (item.arabic_text) {
-    const ar = item.arabic_text;
-    if (ar.includes('قُلْ هُوَ اللَّهُ أَحَدٌ') || ar.includes('قل هو الله احد')) { surahNum = 112; ayahNum = 1; }
-    else if (ar.includes('قُلْ أَعُوذُ بِرَبِّ الْفَلَقِ') || ar.includes('قل اعوذ برب الفلق')) { surahNum = 113; ayahNum = 1; }
-    else if (ar.includes('قُلْ أَعُوذُ بِرَبِّ النَّاسِ') || ar.includes('قل اعوذ برب الناس')) { surahNum = 114; ayahNum = 1; }
-    else if (ar.includes('إِنَّا أَعْطَيْنَاكَ الْكَوْثَرَ') || ar.includes('انا اعطيناك الكوثر')) { surahNum = 108; ayahNum = 1; }
-    else if (ar.includes('أَلَمْ تَرَ كَيْفَ فَعَلَ رَبُّكَ') || ar.includes('الم تر كيف فعل ربك')) { surahNum = 105; ayahNum = 1; }
-    else if (ar.includes('إِيَّاكَ نَعْبُدُ وَإِيَّاكَ نَسْتَعِينُ')) { surahNum = 1; ayahNum = 5; }
-    else if (ar.includes('قُلْ يَا أَيُّهَا الْكَافِرُونَ')) { surahNum = 109; ayahNum = 1; }
-    else if (ar.includes('إِذَا جَاءَ نصر اللَّهِ وَالْفَتْحُ') || ar.includes('إِذَا جَاءَ نَصْرُ اللَّهِ وَالْفَتْحُ')) { surahNum = 110; ayahNum = 1; }
-    else if (ar.includes('تَبَّتْ يَدَا أَبِي لَهَبٍ')) { surahNum = 111; ayahNum = 1; }
-    else if (ar.includes('وَالْعَصْرِ')) { surahNum = 103; ayahNum = 1; }
-    else if (ar.includes('إِنَّا أَنْزَلْنَاهُ فِي لَيْلَةِ الْقَدْرِ')) { surahNum = 97; ayahNum = 1; }
-    else if (ar.includes('أَرَأَيْتَ الَّذِي يُكَذِّبُ بِالدِّينِ')) { surahNum = 107; ayahNum = 1; }
-    else if (ar.includes('اللَّهُ لَا إِلَٰهَ إِلَّا هُوَ الْحَيُّ الْقَيُّومُ')) { surahNum = 2; ayahNum = 255; }
+  if (!surahNum && item.arabic_text) {
+    const resolved = resolveSpecificVerse(undefined, undefined, item.arabic_text);
+    if (resolved) {
+      surahNum = resolved.surah.surahNum;
+      ayahNum = resolved.verse.ayah;
+    }
   }
 
   if (!surahNum) return null;
@@ -207,6 +158,48 @@ export function resolveQuranAudioUrl(item: GameItem, qariId = 'alafasy'): string
   const aStr = String(ayahNum).padStart(3, '0');
 
   return `${qariObj.cdn}${sStr}${aStr}.mp3`;
+}
+
+export function sanitizeAudioGameItem(item: GameItem, defaultSubject?: string): GameItem {
+  const isIslamic =
+    (item.arabic_text && isArabicText(item.arabic_text)) ||
+    (item.audio_text && isArabicText(item.audio_text)) ||
+    isIslamicQuestion(item.subject_name || defaultSubject, `${item.prompt_text || ''} ${item.correct_answer || ''}`);
+
+  if (!isIslamic) {
+    return item;
+  }
+
+  const hasArabicInAr = item.arabic_text && isArabicText(item.arabic_text);
+  const hasArabicInAudio = item.audio_text && isArabicText(item.audio_text);
+
+  // If arabic_text is missing or audio_text is not Arabic (e.g. is question prompt or Indonesian)
+  if (!hasArabicInAr || !hasArabicInAudio || !item.surah_number) {
+    const query = `${item.surah_name || ''} ${item.prompt_text || ''} ${item.correct_answer || ''} ${(item.options || []).join(' ')}`;
+    const resolved = resolveSpecificVerse(item.surah_number, item.ayah_number, query);
+    const surahObj = resolved ? resolved.surah : findQuranSurah(query);
+    const verseObj = resolved ? resolved.verse : (surahObj.verses[0] || { ayah: 1, ar: 'قُلْ هُوَ اللَّهُ أَحَدٌ', id: 'Katakanlah: Dialah Allah, Yang Maha Esa.' });
+
+    const finalAr = hasArabicInAr ? item.arabic_text : verseObj.ar;
+
+    return {
+      ...item,
+      surah_number: item.surah_number || surahObj.surahNum,
+      ayah_number: item.ayah_number || verseObj.ayah,
+      arabic_text: finalAr,
+      audio_text: finalAr,
+      translation: item.translation || verseObj.id,
+    };
+  }
+
+  if (hasArabicInAr && (!item.audio_text || !hasArabicInAudio)) {
+    return {
+      ...item,
+      audio_text: item.arabic_text,
+    };
+  }
+
+  return item;
 }
 
 // Auto-Classifier for Game Questions
@@ -539,26 +532,57 @@ export function generateOfflineGameItems(
         subject_name: subjectName,
       });
     } else if (gameMode === 'tebak-audio') {
-      const correct = isIslamic ? `Surat Al-Falaq` : `${topic}`;
-      const distractors = isIslamic
-        ? [`Surat An-Nas`, `Surat Al-Ikhlas`, `Surat Al-Lahab`]
-        : [`Topik Pengecoh X`, `Topik Pengecoh Y`, `Topik Pengecoh Z`];
+      let correct = '';
+      let distractors: string[] = [];
+      let surahNum: number | undefined = undefined;
+      let ayahNum: number | undefined = undefined;
+      let arText: string | undefined = undefined;
+      let transText: string | undefined = undefined;
+      let promptText = '';
+
+      if (isIslamic) {
+        const surahObj = findQuranSurah(topic);
+        const verseIdx = i % surahObj.verses.length;
+        const verseObj = surahObj.verses[verseIdx] || surahObj.verses[0];
+
+        surahNum = surahObj.surahNum;
+        ayahNum = verseObj.ayah;
+        arText = verseObj.ar;
+        transText = verseObj.id;
+
+        correct = `Surat ${surahObj.surahName} (Ayat ${ayahNum})`;
+        promptText = `Dengarkan lantunan ayat suci Al-Qur'an berikut! Tentukan nama surat dan nomor ayat yang dilantunkan (Soal #${num}):`;
+
+        // Pengecoh surat & ayat lain
+        const otherSurahs = Object.values(QURAN_VERSES_DB).filter((s) => s.surahNum !== surahNum);
+        distractors = [
+          `Surat ${otherSurahs[0 % otherSurahs.length].surahName} (Ayat ${ayahNum})`,
+          `Surat ${otherSurahs[1 % otherSurahs.length].surahName} (Ayat ${(ayahNum % 3) + 1})`,
+          `Surat ${surahObj.surahName} (Ayat ${ayahNum + 1})`,
+        ];
+      } else {
+        correct = `${topic} (Konsep Inti)`;
+        promptText = `Dengarkan narasi audio penjelasan berikut dan tentukan konsep yang benar (${topic} - Soal #${num}):`;
+        distractors = [`Prinsip Alternatif A`, `Prinsip Alternatif B`, `Prinsip Alternatif C`];
+      }
+
       const allOpts = [correct, ...distractors].sort(() => Math.random() - 0.5);
 
       result.push({
         id: itemId,
         category: 'tebak-audio',
         difficulty: difficulty,
-        surah_number: isIslamic ? 113 : undefined,
-        ayah_number: isIslamic ? 1 : undefined,
-        prompt_text: isIslamic
-          ? `Dengarkan audio bacaan berikut dan tentukan surat yang dibacakan (${topic} - Soal #${num}):`
-          : `Dengarkan narasi audio berikut dan tentukan konsep yang benar (${topic} - Soal #${num}):`,
-        arabic_text: isIslamic ? `قُلْ أَعُوذُ بِرَبِّ الْفَلَقِ` : undefined,
-        translation: isIslamic ? `Katakanlah: Aku berlindung kepada Tuhan yang menguasai subuh.` : undefined,
+        surah_number: surahNum,
+        ayah_number: ayahNum,
+        prompt_text: promptText,
+        arabic_text: arText,
+        audio_text: isIslamic ? arText : `Berikut adalah narasi materi mengenai ${topic}. Simak dan pahami pokok bahasannya.`,
+        translation: transText,
         options: allOpts,
         correct_answer: correct,
-        explanation: `Audio membacakan konten seputar materi "${topic}".`,
+        explanation: isIslamic
+          ? `Lafaz yang dilantunkan adalah ${arText} (${correct}) yang artinya: "${transText}".`
+          : `Audio membacakan materi seputar "${topic}".`,
         subject_name: subjectName,
       });
     } else if (gameMode === 'puzzle-ayat') {
@@ -733,7 +757,15 @@ export const AiGameGeneratorView: React.FC<AiGameGeneratorViewProps> = ({
       if (saved) {
         const parsed = JSON.parse(saved);
         if (parsed && typeof parsed === 'object') {
-          return parsed;
+          const sanitized: Record<string, GameItem[]> = {};
+          for (const k of Object.keys(parsed)) {
+            if (Array.isArray(parsed[k])) {
+              sanitized[k] = parsed[k].map((it: GameItem) => sanitizeAudioGameItem(it));
+            } else {
+              sanitized[k] = [];
+            }
+          }
+          return sanitized;
         }
       }
     } catch (e) {
@@ -886,62 +918,100 @@ export const AiGameGeneratorView: React.FC<AiGameGeneratorViewProps> = ({
     const item = activePlayItems[currentIdx];
     if (!item) return;
 
-    // Try authentic Qari MP3 recitation first if not forced TTS / not tts_indonesia
-    if (!forceTTS && selectedQari !== 'tts_indonesia') {
-      const mp3Url = resolveQuranAudioUrl(item, selectedQari);
-      if (mp3Url) {
-        setAudioLoading(true);
-        setAudioSourceType('qari_mp3');
+    // Deteksi konteks keagamaan (Islam / Al-Qur'an)
+    const isIslamic =
+      isIslamicSubject ||
+      (item.arabic_text && isArabicText(item.arabic_text)) ||
+      (item.audio_text && isArabicText(item.audio_text)) ||
+      isIslamicQuestion(item.subject_name || selectedSubject, `${item.prompt_text || ''} ${item.correct_answer || ''}`);
 
-        const audio = new Audio(mp3Url);
-        audio.playbackRate = playbackSpeed;
-        audioRef.current = audio;
-
-        audio.oncanplay = () => {
-          setAudioLoading(false);
-        };
-
-        audio.onplay = () => {
-          setIsPlayingAudio(true);
-          setAudioLoading(false);
-        };
-
-        audio.ontimeupdate = () => {
-          if (audio.duration && !isNaN(audio.duration)) {
-            setAudioProgress({
-              current: Math.floor(audio.currentTime),
-              duration: Math.floor(audio.duration),
-            });
-          }
-        };
-
-        audio.onended = () => {
-          setIsPlayingAudio(false);
-          setAudioProgress({ current: 0, duration: 0 });
-          audioRef.current = null;
-        };
-
-        audio.onerror = () => {
-          console.warn('Qari MP3 failed to load, switching smoothly to TTS');
-          setAudioLoading(false);
-          audioRef.current = null;
-          playTtsText(overrideText || item.audio_text || item.arabic_text || item.prompt_text);
-        };
-
-        audio.play().catch((err) => {
-          console.warn('Playback blocked/error, switching to TTS:', err);
-          setAudioLoading(false);
-          audioRef.current = null;
-          playTtsText(overrideText || item.audio_text || item.arabic_text || item.prompt_text);
-        });
-
-        return;
+    if (isIslamic) {
+      // 1. Tentukan lafaz ayat Al-Qur'an yang valid (Arab asli dengan harakat)
+      let arabicVerse = '';
+      if (overrideText && isArabicText(overrideText)) {
+        arabicVerse = overrideText;
+      } else if (item.arabic_text && isArabicText(item.arabic_text)) {
+        arabicVerse = item.arabic_text;
+      } else if (item.audio_text && isArabicText(item.audio_text)) {
+        arabicVerse = item.audio_text;
+      } else {
+        const query = `${item.surah_name || ''} ${item.prompt_text || ''} ${item.correct_answer || ''} ${(item.options || []).join(' ')}`;
+        const resolved = resolveSpecificVerse(item.surah_number, item.ayah_number, query);
+        if (resolved?.verse?.ar) {
+          arabicVerse = resolved.verse.ar;
+          item.arabic_text = resolved.verse.ar;
+          item.audio_text = resolved.verse.ar;
+          item.surah_number = resolved.surah.surahNum;
+          item.ayah_number = resolved.verse.ayah;
+          if (!item.translation && resolved.verse.id) item.translation = resolved.verse.id;
+        } else {
+          arabicVerse = 'قُلْ هُوَ اللَّهُ أَحَدٌ';
+        }
       }
+
+      // 2. Putar Murottal Qari Asli (MP3) terlebih dahulu jika bukan TTS paksaan / bukan narasi Indonesia
+      if (!forceTTS && selectedQari !== 'tts_indonesia') {
+        const mp3Url = resolveQuranAudioUrl(item, selectedQari);
+        if (mp3Url) {
+          setAudioLoading(true);
+          setAudioSourceType('qari_mp3');
+
+          const audio = new Audio(mp3Url);
+          audio.playbackRate = playbackSpeed;
+          audioRef.current = audio;
+
+          audio.oncanplay = () => {
+            setAudioLoading(false);
+          };
+
+          audio.onplay = () => {
+            setIsPlayingAudio(true);
+            setAudioLoading(false);
+          };
+
+          audio.ontimeupdate = () => {
+            if (audio.duration && !isNaN(audio.duration)) {
+              setAudioProgress({
+                current: Math.floor(audio.currentTime),
+                duration: Math.floor(audio.duration),
+              });
+            }
+          };
+
+          audio.onended = () => {
+            setIsPlayingAudio(false);
+            setAudioProgress({ current: 0, duration: 0 });
+            audioRef.current = null;
+          };
+
+          audio.onerror = () => {
+            console.warn('Qari MP3 network/cors issue, fallback to Arabic recitation TTS');
+            setAudioLoading(false);
+            audioRef.current = null;
+            // PERBAIKAN MUTLAK: Wajib lantunkan lafaz ayat Arab, BUKAN teks soal (prompt_text)!
+            playTtsText(arabicVerse, 'ar-SA', 0.82 * playbackSpeed, 0.96);
+          };
+
+          audio.play().catch((err) => {
+            console.warn('Playback error, fallback to Arabic recitation TTS:', err);
+            setAudioLoading(false);
+            audioRef.current = null;
+            // PERBAIKAN MUTLAK: Wajib lantunkan lafaz ayat Arab, BUKAN teks soal (prompt_text)!
+            playTtsText(arabicVerse, 'ar-SA', 0.82 * playbackSpeed, 0.96);
+          });
+
+          return;
+        }
+      }
+
+      // 3. Fallback / Pilihan TTS Khusus Ayat Keagamaan: Wajib lantunkan lafaz ayat Arab!
+      playTtsText(arabicVerse, 'ar-SA', 0.82 * playbackSpeed, 0.96);
+      return;
     }
 
-    // TTS Fallback or direct TTS request
-    const textToPlay = overrideText || item.audio_text || item.arabic_text || item.prompt_text;
-    playTtsText(textToPlay);
+    // Untuk Mapel Umum (Non-Keagamaan): Narasi teks mendengarkan / menyimak
+    const narrationText = overrideText || item.audio_text || item.prompt_text;
+    playTtsText(narrationText, 'id-ID', 0.88 * playbackSpeed, 1.06);
   };
 
   const playTtsText = (text?: string, targetLang?: string, customRate?: number, customPitch?: number) => {
@@ -1585,14 +1655,17 @@ export const AiGameGeneratorView: React.FC<AiGameGeneratorViewProps> = ({
   const applyNewGeneratedItems = (items: GameItem[], successMsg: string) => {
     const currentModeList = gameDataMap[activeMode] || [];
 
-    // Set item baru dengan ID unik & atribut category/subject_name yang konsisten
-    const exclusiveItems: GameItem[] = items.map((raw, idx) => ({
-      ...raw,
-      category: activeMode,
-      difficulty: raw.difficulty || difficulty,
-      id: `game-${Date.now()}-${Math.random().toString(36).substring(2, 7)}-${idx}`,
-      subject_name: raw.subject_name || selectedSubject,
-    }));
+    // Set item baru dengan ID unik, sanitasi audio, & atribut category/subject_name yang konsisten
+    const exclusiveItems: GameItem[] = items.map((raw, idx) => {
+      const sanitized = sanitizeAudioGameItem(raw, selectedSubject);
+      return {
+        ...sanitized,
+        category: activeMode,
+        difficulty: sanitized.difficulty || difficulty,
+        id: `game-${Date.now()}-${Math.random().toString(36).substring(2, 7)}-${idx}`,
+        subject_name: sanitized.subject_name || selectedSubject,
+      };
+    });
 
     // Akumulasikan soal baru tanpa menghapus soal lama
     const nextMap = {
@@ -3317,14 +3390,26 @@ export const AiGameGeneratorView: React.FC<AiGameGeneratorViewProps> = ({
                                   <span>Hentikan Suara ⏹️</span>
                                 </button>
                               ) : (
-                                <button
-                                  type="button"
-                                  onClick={() => playVerseAudio()}
-                                  className="px-8 py-4 bg-gradient-to-r from-amber-500 via-emerald-500 to-indigo-600 hover:scale-105 active:scale-95 transition-all text-slate-950 font-black text-base rounded-2xl shadow-2xl shadow-amber-500/20 flex items-center justify-center gap-3 cursor-pointer"
-                                >
-                                  <Volume2 className="w-6 h-6 animate-bounce" />
-                                  <span>Putar Bacaan Ayat (Murottal Qari) 🔊</span>
-                                </button>
+                                <div className="flex flex-col items-center gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => playVerseAudio()}
+                                    className="px-8 py-4 bg-gradient-to-r from-amber-500 via-emerald-500 to-indigo-600 hover:scale-105 active:scale-95 transition-all text-slate-950 font-black text-base rounded-2xl shadow-2xl shadow-amber-500/20 flex items-center justify-center gap-3 cursor-pointer"
+                                  >
+                                    <Volume2 className="w-6 h-6 animate-bounce" />
+                                    <span>
+                                      {isIslamicSubject || isArabicText(activePlayItems[currentIdx].arabic_text) || isArabicText(activePlayItems[currentIdx].audio_text)
+                                        ? 'Putar Bacaan Ayat (Murottal Qari) 🔊'
+                                        : 'Putar Audio Narasi Soal 🔊'}
+                                    </span>
+                                  </button>
+                                  {(isIslamicSubject || isArabicText(activePlayItems[currentIdx].arabic_text) || isArabicText(activePlayItems[currentIdx].audio_text)) && (
+                                    <p className="text-xs text-emerald-300/90 font-medium flex items-center justify-center gap-1.5">
+                                      <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                                      <span>Membacakan lantunan ayat Al-Qur'an (Bukan teks soal). Gunakan tombol di bawah jika ingin mendengar pembacaan soal.</span>
+                                    </p>
+                                  )}
+                                </div>
                               )}
 
                               {/* Interactive Audio Scrubber & Equalizer Animation */}

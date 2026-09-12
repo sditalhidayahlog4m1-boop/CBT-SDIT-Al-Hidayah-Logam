@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { History, Download, Eye, Search, Trash2, Award, CheckCircle2, XCircle, Filter, BookOpen } from 'lucide-react';
 import { ExamResult, QuestionBank } from '../types';
 import { exportExamResultsExcel } from '../utils/exportImport';
-import { deleteExamResultFromFirestore } from '../utils/firebaseSync';
+import { deleteExamResultFromFirestore, clearAllExamResultsInFirestore } from '../utils/firebaseSync';
 import { ConfirmModal, ToastContainer, ToastMessage } from './NotificationModal';
 import { useHistoryModal } from '../utils/navigationHistory';
 
@@ -45,6 +45,7 @@ export const ExamHistoryView: React.FC<ExamHistoryViewProps> = ({
   });
 
   const [deleteConfirmTarget, setDeleteConfirmTarget] = useState<ExamResult | null>(null);
+  const [showClearAllModal, setShowClearAllModal] = useState<boolean>(false);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
   const addToast = (type: 'success' | 'error' | 'warning' | 'info', message: string, title?: string) => {
@@ -63,15 +64,23 @@ export const ExamHistoryView: React.FC<ExamHistoryViewProps> = ({
     setDeleteConfirmTarget(result);
   };
 
-  const executeDelete = () => {
+  const executeDelete = async () => {
     if (!deleteConfirmTarget) return;
     const studentName = deleteConfirmTarget.studentName;
     const targetId = deleteConfirmTarget.id;
     setResults((prev) => prev.filter((r) => r.id !== targetId));
-    deleteExamResultFromFirestore(targetId);
+    await deleteExamResultFromFirestore(targetId);
     if (selectedResult?.id === targetId) setSelectedResult(null);
     setDeleteConfirmTarget(null);
-    addToast('success', `Riwayat ujian ${studentName} berhasil dihapus.`, 'Berhasil Dihapus');
+    addToast('success', `Riwayat ujian "${studentName}" berhasil dihapus permanen dari Firebase.`, 'Berhasil Dihapus');
+  };
+
+  const executeClearAll = async () => {
+    setResults([]);
+    await clearAllExamResultsInFirestore();
+    setShowClearAllModal(false);
+    setSelectedResult(null);
+    addToast('success', 'Seluruh data riwayat ujian siswa berhasil dikosongkan permanen dari Firebase.', 'Berhasil Dikosongkan');
   };
 
   return (
@@ -133,6 +142,17 @@ export const ExamHistoryView: React.FC<ExamHistoryViewProps> = ({
             <Download className="w-4 h-4" />
             <span>Export Excel Rekap Per Mapel</span>
           </button>
+
+          {results.length > 0 && (
+            <button
+              onClick={() => setShowClearAllModal(true)}
+              className="px-3.5 py-2 bg-rose-500/10 hover:bg-rose-600 text-rose-300 hover:text-white border border-rose-500/30 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shrink-0 cursor-pointer"
+              title="Kosongkan seluruh riwayat ujian secara permanen dari Firebase"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Kosongkan Riwayat</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -325,16 +345,28 @@ export const ExamHistoryView: React.FC<ExamHistoryViewProps> = ({
           </div>
         </div>
       )}
-      {/* Confirmation Modal */}
+      {/* Confirmation Modal - Single Record */}
       <ConfirmModal
         isOpen={!!deleteConfirmTarget}
         title="Hapus Riwayat Ujian"
-        message={`Apakah Anda yakin ingin menghapus data riwayat ujian milik "${deleteConfirmTarget?.studentName}"? Tindakan ini tidak dapat dibatalkan.`}
-        confirmText="Ya, Hapus Record"
+        message={`Apakah Anda yakin ingin menghapus data riwayat ujian milik "${deleteConfirmTarget?.studentName}"? Tindakan ini akan menghapus data secara permanen dari database Firebase Firestore.`}
+        confirmText="Ya, Hapus Permanen"
         cancelText="Batal"
         type="danger"
         onConfirm={executeDelete}
         onCancel={() => setDeleteConfirmTarget(null)}
+      />
+
+      {/* Confirmation Modal - Clear All Records */}
+      <ConfirmModal
+        isOpen={showClearAllModal}
+        title="Kosongkan Seluruh Riwayat Ujian"
+        message="Apakah Anda yakin ingin mengosongkan seluruh riwayat ujian siswa? Seluruh data hasil ujian akan dihapus secara permanen dari database Firebase Firestore dan tidak dapat dikembalikan."
+        confirmText="Ya, Kosongkan Semua"
+        cancelText="Batal"
+        type="danger"
+        onConfirm={executeClearAll}
+        onCancel={() => setShowClearAllModal(false)}
       />
 
       {/* Toast Notifications */}

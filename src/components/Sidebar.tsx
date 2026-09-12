@@ -56,7 +56,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const allMenuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'profil-saya', label: 'Profil Saya', icon: User, isProfile: true },
     { id: 'profil-sekolah', label: 'Profil Sekolah', icon: School },
     { id: 'data-guru', label: 'Data Guru', icon: Users },
     { id: 'data-siswa', label: 'Data Siswa', icon: GraduationCap },

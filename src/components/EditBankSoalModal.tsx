@@ -355,6 +355,12 @@ export const EditBankSoalModal: React.FC<EditBankSoalModalProps> = ({
 
           <div className="flex items-center gap-2">
             <button
+              onClick={onClose}
+              className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold cursor-pointer transition-all"
+            >
+              Batal
+            </button>
+            <button
               onClick={handleSave}
               className="px-4 py-2 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-emerald-500/20 cursor-pointer transition-all"
             >
@@ -812,29 +818,6 @@ export const EditBankSoalModal: React.FC<EditBankSoalModalProps> = ({
               )}
             </div>
           )}
-        </div>
-
-        {/* FOOTER ACTION BAR */}
-        <div className="p-4 border-t border-slate-800 bg-slate-950 flex items-center justify-between">
-          <span className="text-xs text-slate-400">
-            Total {questions.length} butir soal terdaftar pada paket ini.
-          </span>
-
-          <div className="flex items-center gap-2">
-            <button
-              onClick={onClose}
-              className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-xs cursor-pointer"
-            >
-              Batal
-            </button>
-            <button
-              onClick={handleSave}
-              className="px-5 py-2 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-white font-black rounded-xl text-xs shadow-lg shadow-emerald-500/20 flex items-center gap-1.5 cursor-pointer"
-            >
-              <Save className="w-4 h-4" />
-              <span>Simpan Perubahan</span>
-            </button>
-          </div>
         </div>
       </div>
     </div>

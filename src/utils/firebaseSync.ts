@@ -9,6 +9,10 @@ import {
   collection,
   writeBatch,
   onSnapshot,
+  query,
+  where,
+  updateDoc,
+  deleteField,
   Firestore,
   Unsubscribe,
 } from 'firebase/firestore';
@@ -25,6 +29,32 @@ import {
 } from '../types';
 import { SchoolProfile, AdminAccount } from './storage';
 import firebaseConfigRaw from '../../firebase-applet-config.json';
+
+// Local sets of IDs permanently deleted by user to prevent stale read race conditions
+const locallyDeletedLogIds = new Set<string>();
+const locallyDeletedResultIds = new Set<string>();
+const locallyDeletedLoginLogIds = new Set<string>();
+
+export function recordDeletedGameLogId(id: string) {
+  if (id) locallyDeletedLogIds.add(id);
+}
+export function isGameLogDeletedLocally(id: string): boolean {
+  return locallyDeletedLogIds.has(id);
+}
+
+export function recordDeletedExamResultId(id: string) {
+  if (id) locallyDeletedResultIds.add(id);
+}
+export function isExamResultDeletedLocally(id: string): boolean {
+  return locallyDeletedResultIds.has(id);
+}
+
+export function recordDeletedLoginLogId(id: string) {
+  if (id) locallyDeletedLoginLogIds.add(id);
+}
+export function isLoginLogDeletedLocally(id: string): boolean {
+  return locallyDeletedLoginLogIds.has(id);
+}
 
 export interface AppData {
   teachers?: Teacher[];
@@ -119,49 +149,92 @@ export async function fetchAppDataFromFirestore(silent = true): Promise<AppData 
       data = mainSnap.data() as AppData;
     }
 
-    // 1. Resolve Exam Results
+    // 1. Resolve Exam Results (dedicated collection is the source of truth)
     const resultsFromCollection: ExamResult[] = [];
     if (resultsSnap && !resultsSnap.empty) {
       resultsSnap.forEach((d) => {
-        resultsFromCollection.push(d.data() as ExamResult);
+        const item = d.data() as ExamResult;
+        if (item && item.id && !isExamResultDeletedLocally(item.id)) {
+          resultsFromCollection.push(item);
+        }
       });
     }
 
-    // Merge with legacy results if present
-    const legacyResults = Array.isArray(data.results) ? data.results : [];
-    const resultMap = new Map<string, ExamResult>();
-    [...legacyResults, ...resultsFromCollection].forEach((r) => {
-      if (r && r.id) resultMap.set(r.id, r);
-    });
-    data.results = Array.from(resultMap.values());
-
-    // 2. Resolve Game Logs
+    // 2. Resolve Game Logs (dedicated collection is the source of truth)
     const gameLogsFromCollection: GameHistoryLog[] = [];
     if (gameLogsSnap && !gameLogsSnap.empty) {
       gameLogsSnap.forEach((d) => {
-        gameLogsFromCollection.push(d.data() as GameHistoryLog);
+        const item = d.data() as GameHistoryLog;
+        if (item && item.id && !isGameLogDeletedLocally(item.id)) {
+          gameLogsFromCollection.push(item);
+        }
       });
     }
-    const legacyGameLogs = Array.isArray(data.gameLogs) ? data.gameLogs : [];
-    const gameLogMap = new Map<string, GameHistoryLog>();
-    [...legacyGameLogs, ...gameLogsFromCollection].forEach((g) => {
-      if (g && g.id) gameLogMap.set(g.id, g);
-    });
-    data.gameLogs = Array.from(gameLogMap.values());
 
     // 3. Resolve Login Logs
     const loginLogsFromCollection: UserLoginLog[] = [];
     if (loginLogsSnap && !loginLogsSnap.empty) {
       loginLogsSnap.forEach((d) => {
-        loginLogsFromCollection.push(d.data() as UserLoginLog);
+        const item = d.data() as UserLoginLog;
+        if (item && item.id && !isLoginLogDeletedLocally(item.id)) {
+          loginLogsFromCollection.push(item);
+        }
       });
     }
-    const legacyLoginLogs = Array.isArray(data.loginLogs) ? data.loginLogs : [];
-    const loginLogMap = new Map<string, UserLoginLog>();
-    [...legacyLoginLogs, ...loginLogsFromCollection].forEach((l) => {
-      if (l && l.id) loginLogMap.set(l.id, l);
-    });
-    data.loginLogs = Array.from(loginLogMap.values());
+
+    // Permanently cleanup legacy high-volume arrays inside app_data/main so they never resurrect deleted items
+    const hasLegacyResults = Array.isArray(data.results) && data.results.length > 0;
+    const hasLegacyGameLogs = Array.isArray(data.gameLogs) && data.gameLogs.length > 0;
+    const hasLegacyLoginLogs = Array.isArray(data.loginLogs) && data.loginLogs.length > 0;
+
+    if (hasLegacyResults || hasLegacyGameLogs || hasLegacyLoginLogs) {
+      // First-time migration check: if collection was completely empty, transfer non-deleted legacy items once
+      if (resultsFromCollection.length === 0 && hasLegacyResults) {
+        const batch = writeBatch(db);
+        (data.results || []).forEach((r) => {
+          if (r && r.id && !isExamResultDeletedLocally(r.id)) {
+            batch.set(doc(db, EXAM_RESULTS_COLLECTION, r.id), r, { merge: true });
+            resultsFromCollection.push(r);
+          }
+        });
+        await batch.commit().catch(() => {});
+      }
+
+      if (gameLogsFromCollection.length === 0 && hasLegacyGameLogs) {
+        const batch = writeBatch(db);
+        (data.gameLogs || []).forEach((g) => {
+          if (g && g.id && !isGameLogDeletedLocally(g.id)) {
+            batch.set(doc(db, GAME_LOGS_COLLECTION, g.id), g, { merge: true });
+            gameLogsFromCollection.push(g);
+          }
+        });
+        await batch.commit().catch(() => {});
+      }
+
+      if (loginLogsFromCollection.length === 0 && hasLegacyLoginLogs) {
+        const batch = writeBatch(db);
+        (data.loginLogs || []).forEach((l) => {
+          if (l && l.id && !isLoginLogDeletedLocally(l.id)) {
+            batch.set(doc(db, LOGIN_LOGS_COLLECTION, l.id), l, { merge: true });
+            loginLogsFromCollection.push(l);
+          }
+        });
+        await batch.commit().catch(() => {});
+      }
+
+      // Immediately purge legacy fields from app_data/main to permanently prevent reappearance
+      updateDoc(mainDocRef, {
+        results: deleteField(),
+        gameLogs: deleteField(),
+        loginLogs: deleteField(),
+      }).catch(async () => {
+        await setDoc(mainDocRef, { results: [], gameLogs: [], loginLogs: [] }, { merge: true }).catch(() => {});
+      });
+    }
+
+    data.results = resultsFromCollection;
+    data.gameLogs = gameLogsFromCollection;
+    data.loginLogs = loginLogsFromCollection;
 
     return data;
   } catch (err: any) {
@@ -280,7 +353,10 @@ export function subscribeToAppData(
       (snap) => {
         const list: ExamResult[] = [];
         snap.forEach((d) => {
-          list.push(d.data() as ExamResult);
+          const item = d.data() as ExamResult;
+          if (item && item.id && !isExamResultDeletedLocally(item.id)) {
+            list.push(item);
+          }
         });
         currentResults = list.sort((a, b) => {
           const timeA = new Date(a.date || (a as any).completedAt || 0).getTime();
@@ -299,7 +375,10 @@ export function subscribeToAppData(
       (snap) => {
         const list: GameHistoryLog[] = [];
         snap.forEach((d) => {
-          list.push(d.data() as GameHistoryLog);
+          const item = d.data() as GameHistoryLog;
+          if (item && item.id && !isGameLogDeletedLocally(item.id)) {
+            list.push(item);
+          }
         });
         currentGameLogs = list.sort((a, b) => {
           const timeA = new Date(a.timestamp || (a as any).playedAt || 0).getTime();
@@ -318,7 +397,10 @@ export function subscribeToAppData(
       (snap) => {
         const list: UserLoginLog[] = [];
         snap.forEach((d) => {
-          list.push(d.data() as UserLoginLog);
+          const item = d.data() as UserLoginLog;
+          if (item && item.id && !isLoginLogDeletedLocally(item.id)) {
+            list.push(item);
+          }
         });
         currentLoginLogs = list.sort((a, b) => {
           return (b.lastSeenTime || '').localeCompare(a.lastSeenTime || '');
@@ -358,16 +440,80 @@ export async function syncExamResultToFirestore(result: ExamResult): Promise<voi
 }
 
 /**
- * Delete a single exam result document from Firestore
+ * Permanently delete a single exam result document from Firestore and localStorage
  */
-export async function deleteExamResultFromFirestore(resultId: string): Promise<void> {
+export async function deleteExamResultFromFirestore(resultId: string): Promise<boolean> {
+  if (!resultId) return false;
+  recordDeletedExamResultId(resultId);
+
+  // 1. Immediately update localStorage
+  try {
+    const raw = localStorage.getItem('cbt_results');
+    if (raw) {
+      const parsed: ExamResult[] = JSON.parse(raw);
+      const filtered = parsed.filter((item) => item && item.id !== resultId);
+      localStorage.setItem('cbt_results', JSON.stringify(filtered));
+    }
+  } catch {}
+
   const db = getFirestoreDb();
-  if (!db || !resultId) return;
+  if (!db) return true;
 
   try {
-    await deleteDoc(doc(db, EXAM_RESULTS_COLLECTION, resultId));
+    // 2. Delete document by ID in dedicated collection
+    await deleteDoc(doc(db, EXAM_RESULTS_COLLECTION, resultId)).catch(() => {});
+
+    // 3. Delete any documents matching 'id' field
+    const querySnap = await getDocs(query(collection(db, EXAM_RESULTS_COLLECTION), where('id', '==', resultId))).catch(() => null);
+    if (querySnap && !querySnap.empty) {
+      const batch = writeBatch(db);
+      querySnap.forEach((d) => batch.delete(d.ref));
+      await batch.commit().catch(() => {});
+    }
+
+    // 4. Remove from app_data/main if legacy field exists
+    const mainDocRef = doc(db, MAIN_COLLECTION, MAIN_DOCUMENT);
+    const mainSnap = await getDoc(mainDocRef).catch(() => null);
+    if (mainSnap && mainSnap.exists()) {
+      const mainData = mainSnap.data();
+      if (Array.isArray(mainData.results)) {
+        const filtered = mainData.results.filter((r: any) => r && r.id !== resultId);
+        await updateDoc(mainDocRef, { results: filtered }).catch(() => {});
+      }
+    }
+
+    console.log(`[Firestore] Hasil ujian "${resultId}" berhasil dihapus permanen.`);
+    return true;
   } catch (err) {
     console.warn('[Firestore] Gagal menghapus hasil ujian:', err);
+    return false;
+  }
+}
+
+/**
+ * Permanently clear all exam results from Firestore and localStorage
+ */
+export async function clearAllExamResultsInFirestore(): Promise<boolean> {
+  try {
+    localStorage.setItem('cbt_results', JSON.stringify([]));
+  } catch {}
+
+  const db = getFirestoreDb();
+  if (!db) return true;
+
+  try {
+    await clearFirestoreCollection(db, EXAM_RESULTS_COLLECTION);
+    const mainDocRef = doc(db, MAIN_COLLECTION, MAIN_DOCUMENT);
+    await updateDoc(mainDocRef, {
+      results: deleteField(),
+    }).catch(async () => {
+      await setDoc(mainDocRef, { results: [] }, { merge: true }).catch(() => {});
+    });
+    console.log('[Firestore] Seluruh riwayat ujian berhasil dibersihkan permanen.');
+    return true;
+  } catch (err) {
+    console.warn('[Firestore] Gagal membersihkan semua hasil ujian:', err);
+    return false;
   }
 }
 
@@ -387,37 +533,80 @@ export async function syncGameLogToFirestore(log: GameHistoryLog): Promise<void>
 }
 
 /**
- * Delete a single game log document from Firestore
+ * Permanently delete a single game log document from Firestore and localStorage
  */
-export async function deleteGameLogFromFirestore(logId: string): Promise<void> {
+export async function deleteGameLogFromFirestore(logId: string): Promise<boolean> {
+  if (!logId) return false;
+  recordDeletedGameLogId(logId);
+
+  // 1. Immediately update localStorage
+  try {
+    const raw = localStorage.getItem('cbt_game_logs');
+    if (raw) {
+      const parsed: GameHistoryLog[] = JSON.parse(raw);
+      const filtered = parsed.filter((item) => item && item.id !== logId);
+      localStorage.setItem('cbt_game_logs', JSON.stringify(filtered));
+    }
+  } catch {}
+
   const db = getFirestoreDb();
-  if (!db || !logId) return;
+  if (!db) return true;
 
   try {
-    await deleteDoc(doc(db, GAME_LOGS_COLLECTION, logId));
+    // 2. Delete document by ID in dedicated collection
+    await deleteDoc(doc(db, GAME_LOGS_COLLECTION, logId)).catch(() => {});
+
+    // 3. Delete any documents matching 'id' field
+    const querySnap = await getDocs(query(collection(db, GAME_LOGS_COLLECTION), where('id', '==', logId))).catch(() => null);
+    if (querySnap && !querySnap.empty) {
+      const batch = writeBatch(db);
+      querySnap.forEach((d) => batch.delete(d.ref));
+      await batch.commit().catch(() => {});
+    }
+
+    // 4. Remove from app_data/main if legacy field exists
+    const mainDocRef = doc(db, MAIN_COLLECTION, MAIN_DOCUMENT);
+    const mainSnap = await getDoc(mainDocRef).catch(() => null);
+    if (mainSnap && mainSnap.exists()) {
+      const mainData = mainSnap.data();
+      if (Array.isArray(mainData.gameLogs)) {
+        const filtered = mainData.gameLogs.filter((g: any) => g && g.id !== logId);
+        await updateDoc(mainDocRef, { gameLogs: filtered }).catch(() => {});
+      }
+    }
+
+    console.log(`[Firestore] Game log "${logId}" berhasil dihapus permanen.`);
+    return true;
   } catch (err) {
     console.warn('[Firestore] Gagal menghapus game log:', err);
+    return false;
   }
 }
 
 /**
- * Clear all game logs from Firestore
+ * Permanently clear all game logs from Firestore and localStorage
  */
-export async function clearAllGameLogsInFirestore(): Promise<void> {
+export async function clearAllGameLogsInFirestore(): Promise<boolean> {
+  try {
+    localStorage.setItem('cbt_game_logs', JSON.stringify([]));
+  } catch {}
+
   const db = getFirestoreDb();
-  if (!db) return;
+  if (!db) return true;
 
   try {
-    const snaps = await getDocs(collection(db, GAME_LOGS_COLLECTION));
-    if (!snaps.empty) {
-      const batch = writeBatch(db);
-      snaps.forEach((d) => {
-        batch.delete(d.ref);
-      });
-      await batch.commit();
-    }
+    await clearFirestoreCollection(db, GAME_LOGS_COLLECTION);
+    const mainDocRef = doc(db, MAIN_COLLECTION, MAIN_DOCUMENT);
+    await updateDoc(mainDocRef, {
+      gameLogs: deleteField(),
+    }).catch(async () => {
+      await setDoc(mainDocRef, { gameLogs: [] }, { merge: true }).catch(() => {});
+    });
+    console.log('[Firestore] Seluruh riwayat game berhasil dibersihkan permanen.');
+    return true;
   } catch (err) {
     console.warn('[Firestore] Gagal membersihkan semua game logs:', err);
+    return false;
   }
 }
 
@@ -434,6 +623,154 @@ export async function trackUserLoginInFirestore(log: UserLoginLog): Promise<void
   } catch (err) {
     // Silent on network glitch
   }
+}
+
+/**
+ * Permanently delete a single user login log
+ */
+export async function deleteLoginLogFromFirestore(logId: string): Promise<boolean> {
+  if (!logId) return false;
+  recordDeletedLoginLogId(logId);
+
+  try {
+    const raw = localStorage.getItem('cbt_login_logs');
+    if (raw) {
+      const parsed: UserLoginLog[] = JSON.parse(raw);
+      const filtered = parsed.filter((item) => item && item.id !== logId);
+      localStorage.setItem('cbt_login_logs', JSON.stringify(filtered));
+    }
+  } catch {}
+
+  const db = getFirestoreDb();
+  if (!db) return true;
+
+  try {
+    await deleteDoc(doc(db, LOGIN_LOGS_COLLECTION, logId)).catch(() => {});
+    const querySnap = await getDocs(query(collection(db, LOGIN_LOGS_COLLECTION), where('id', '==', logId))).catch(() => null);
+    if (querySnap && !querySnap.empty) {
+      const batch = writeBatch(db);
+      querySnap.forEach((d) => batch.delete(d.ref));
+      await batch.commit().catch(() => {});
+    }
+
+    const mainDocRef = doc(db, MAIN_COLLECTION, MAIN_DOCUMENT);
+    const mainSnap = await getDoc(mainDocRef).catch(() => null);
+    if (mainSnap && mainSnap.exists()) {
+      const mainData = mainSnap.data();
+      if (Array.isArray(mainData.loginLogs)) {
+        const filtered = mainData.loginLogs.filter((l: any) => l && l.id !== logId);
+        await updateDoc(mainDocRef, { loginLogs: filtered }).catch(() => {});
+      }
+    }
+    return true;
+  } catch (err) {
+    console.warn('[Firestore] Gagal menghapus login log:', err);
+    return false;
+  }
+}
+
+/**
+ * Permanently clear all user login logs
+ */
+export async function clearAllLoginLogsInFirestore(): Promise<boolean> {
+  try {
+    localStorage.setItem('cbt_login_logs', JSON.stringify([]));
+  } catch {}
+
+  const db = getFirestoreDb();
+  if (!db) return true;
+
+  try {
+    await clearFirestoreCollection(db, LOGIN_LOGS_COLLECTION);
+    const mainDocRef = doc(db, MAIN_COLLECTION, MAIN_DOCUMENT);
+    await updateDoc(mainDocRef, {
+      loginLogs: deleteField(),
+    }).catch(async () => {
+      await setDoc(mainDocRef, { loginLogs: [] }, { merge: true }).catch(() => {});
+    });
+    return true;
+  } catch (err) {
+    console.warn('[Firestore] Gagal membersihkan login logs:', err);
+    return false;
+  }
+}
+
+/**
+ * Direct permanent deletion functions for Master Data
+ * (Guru, Siswa, Mata Pelajaran, Bank Soal, Nilai Harian)
+ * Writes directly to Firestore Cloud immediately to prevent any sync delay or state loss.
+ */
+
+export async function deleteTeacherPermanently(teacherId: string, currentTeachers: Teacher[]): Promise<Teacher[]> {
+  const updated = currentTeachers.filter((t) => t.id !== teacherId);
+  try {
+    localStorage.setItem('cbt_teachers', JSON.stringify(updated));
+  } catch {}
+  await saveAppDataToFirestore({ teachers: updated });
+  return updated;
+}
+
+export async function deleteTeachersBulkPermanently(teacherIds: string[], currentTeachers: Teacher[]): Promise<Teacher[]> {
+  const updated = currentTeachers.filter((t) => !teacherIds.includes(t.id));
+  try {
+    localStorage.setItem('cbt_teachers', JSON.stringify(updated));
+  } catch {}
+  await saveAppDataToFirestore({ teachers: updated });
+  return updated;
+}
+
+export async function deleteStudentPermanently(studentId: string, currentStudents: Student[]): Promise<Student[]> {
+  const updated = currentStudents.filter((s) => s.id !== studentId);
+  try {
+    localStorage.setItem('cbt_students', JSON.stringify(updated));
+  } catch {}
+  await saveAppDataToFirestore({ students: updated });
+  return updated;
+}
+
+export async function deleteStudentsBulkPermanently(studentIds: string[], currentStudents: Student[]): Promise<Student[]> {
+  const updated = currentStudents.filter((s) => !studentIds.includes(s.id));
+  try {
+    localStorage.setItem('cbt_students', JSON.stringify(updated));
+  } catch {}
+  await saveAppDataToFirestore({ students: updated });
+  return updated;
+}
+
+export async function deleteSubjectPermanently(subjectId: string, currentSubjects: Subject[]): Promise<Subject[]> {
+  const updated = currentSubjects.filter((s) => s.id !== subjectId);
+  try {
+    localStorage.setItem('cbt_subjects', JSON.stringify(updated));
+  } catch {}
+  await saveAppDataToFirestore({ subjects: updated });
+  return updated;
+}
+
+export async function deleteBankSoalPermanently(bankId: string, currentBanks: QuestionBank[]): Promise<QuestionBank[]> {
+  const updated = currentBanks.filter((b) => b.id !== bankId);
+  try {
+    localStorage.setItem('cbt_banks', JSON.stringify(updated));
+  } catch {}
+  await saveAppDataToFirestore({ banks: updated });
+  return updated;
+}
+
+export async function deleteDailyGradePermanently(gradeId: string, currentGrades: DailyGradeRecord[]): Promise<DailyGradeRecord[]> {
+  const updated = currentGrades.filter((g) => g.id !== gradeId);
+  try {
+    localStorage.setItem('cbt_daily_grades', JSON.stringify(updated));
+  } catch {}
+  await saveAppDataToFirestore({ dailyGrades: updated });
+  return updated;
+}
+
+export async function deleteDailyGradesBulkPermanently(gradeIds: string[], currentGrades: DailyGradeRecord[]): Promise<DailyGradeRecord[]> {
+  const updated = currentGrades.filter((g) => !gradeIds.includes(g.id));
+  try {
+    localStorage.setItem('cbt_daily_grades', JSON.stringify(updated));
+  } catch {}
+  await saveAppDataToFirestore({ dailyGrades: updated });
+  return updated;
 }
 
 /**

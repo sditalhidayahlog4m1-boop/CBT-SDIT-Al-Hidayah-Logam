@@ -27,6 +27,7 @@ import { jsPDF } from 'jspdf';
 import { GameHistoryLog, AuthUser } from '../types';
 import { getStoredGameLogs } from '../utils/storage';
 import { useHistoryModal } from '../utils/navigationHistory';
+import { ConfirmModal, ToastContainer, ToastMessage } from './NotificationModal';
 
 interface GameHistoryViewProps {
   gameLogs: GameHistoryLog[];
@@ -66,6 +67,20 @@ export const GameHistoryView: React.FC<GameHistoryViewProps> = ({
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<string>('');
   const [refreshSuccessMessage, setRefreshSuccessMessage] = useState<string | null>(null);
+  const [deleteConfirmTarget, setDeleteConfirmTarget] = useState<GameHistoryLog | null>(null);
+  const [toasts, setToasts] = useState<ToastMessage[]>([]);
+
+  const addToast = (type: 'success' | 'error' | 'warning' | 'info', message: string, title?: string) => {
+    const id = 'toast-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6);
+    setToasts((prev) => [...prev, { id, type, title, message }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 4000);
+  };
+
+  const dismissToast = (id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  };
 
   // Auto set initial sync time & perform background refresh on mount
   useEffect(() => {
@@ -255,13 +270,22 @@ export const GameHistoryView: React.FC<GameHistoryViewProps> = ({
     return { totalPlayed, avgScore, maxScore, uniqueStudents };
   }, [filteredLogs]);
 
-  // Delete single log entry
-  const handleDeleteItem = (id: string) => {
+  // Delete single log entry with confirmation
+  const handleDeleteClick = (log: GameHistoryLog) => {
+    setDeleteConfirmTarget(log);
+  };
+
+  const executeDelete = () => {
+    if (!deleteConfirmTarget) return;
+    const targetName = deleteConfirmTarget.studentName;
+    const targetId = deleteConfirmTarget.id;
     if (onDeleteLog) {
-      onDeleteLog(id);
+      onDeleteLog(targetId);
     } else if (setGameLogs) {
-      setGameLogs((prev) => prev.filter((item) => item.id !== id));
+      setGameLogs((prev) => prev.filter((item) => item.id !== targetId));
     }
+    setDeleteConfirmTarget(null);
+    addToast('success', `Riwayat game milik "${targetName}" berhasil dihapus secara permanen dari Firebase.`, 'Berhasil Dihapus');
   };
 
   // Clear all game history logs
@@ -272,6 +296,7 @@ export const GameHistoryView: React.FC<GameHistoryViewProps> = ({
       setGameLogs([]);
     }
     setShowConfirmResetModal(false);
+    addToast('success', 'Seluruh catatan riwayat game siswa berhasil dibersihkan permanen dari Firebase Firestore.', 'Berhasil Dikosongkan');
   };
 
   // Export to Excel
@@ -893,9 +918,9 @@ export const GameHistoryView: React.FC<GameHistoryViewProps> = ({
                       {!isStudent && (
                         <td className="py-3 px-4 text-center whitespace-nowrap">
                           <button
-                            onClick={() => handleDeleteItem(log.id)}
+                            onClick={() => handleDeleteClick(log)}
                             className="p-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-600 text-rose-400 hover:text-white transition-all cursor-pointer"
-                            title="Hapus Record"
+                            title="Hapus Riwayat Game Siswa (Permanen)"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
@@ -998,6 +1023,21 @@ export const GameHistoryView: React.FC<GameHistoryViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* Modal Konfirmasi Hapus Satuan Riwayat Game */}
+      <ConfirmModal
+        isOpen={Boolean(deleteConfirmTarget)}
+        title="Konfirmasi Hapus Riwayat Game"
+        message={`Apakah Anda yakin ingin menghapus data riwayat game milik "${deleteConfirmTarget?.studentName}" (Game: ${deleteConfirmTarget?.gameTitle}, Nilai: ${deleteConfirmTarget?.score})? Data akan dihapus secara permanen dari database Firebase Firestore.`}
+        confirmText="Ya, Hapus Permanen"
+        cancelText="Batal"
+        type="danger"
+        onConfirm={executeDelete}
+        onCancel={() => setDeleteConfirmTarget(null)}
+      />
+
+      {/* Floating Notifications / Toasts */}
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 };
