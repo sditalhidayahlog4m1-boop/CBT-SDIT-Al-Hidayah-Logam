@@ -1,4 +1,5 @@
 export interface AuthUser {
+  id?: string;
   role: 'guru' | 'siswa' | 'admin' | 'umum';
   name: string;
   username?: string;

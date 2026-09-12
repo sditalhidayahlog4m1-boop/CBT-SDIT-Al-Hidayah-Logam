@@ -19,8 +19,6 @@ import {
   BrainCircuit,
   Gamepad2,
   X,
-  LogIn,
-  UserCheck,
   ShieldCheck,
   User,
   Trophy,
@@ -38,6 +36,7 @@ interface SidebarProps {
   setIsMobileMenuOpen: (open: boolean) => void;
   currentUser?: AuthUser | null;
   onOpenLoginModal?: () => void;
+  onLogout?: () => void;
   rolePermissions?: RolePermissions;
   schoolProfile?: SchoolProfile;
 }
@@ -51,6 +50,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   setIsMobileMenuOpen,
   currentUser,
   onOpenLoginModal,
+  onLogout,
   rolePermissions,
   schoolProfile,
 }) => {
@@ -237,55 +237,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
             );
           })}
         </nav>
-
-        {/* User Account Login Widget in Sidebar Footer */}
-        {onOpenLoginModal && (
-          <div className="p-3 border-t border-slate-800/80 m-2 rounded-2xl bg-slate-900/80 text-xs space-y-2">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div
-                  className={`w-7 h-7 rounded-lg border flex items-center justify-center shrink-0 overflow-hidden ${
-                    currentUser
-                      ? currentUser.role === 'guru'
-                        ? 'bg-indigo-600/20 border-indigo-500/40 text-indigo-400'
-                        : currentUser.role === 'siswa'
-                        ? 'bg-emerald-600/20 border-emerald-500/40 text-emerald-400'
-                        : currentUser.role === 'admin'
-                        ? 'bg-amber-600/20 border-amber-500/40 text-amber-400'
-                        : 'bg-teal-600/20 border-teal-500/40 text-teal-400'
-                      : 'bg-slate-800 border-slate-700 text-amber-400'
-                  }`}
-                >
-                  {currentUser?.photoUrl ? (
-                    <img src={currentUser.photoUrl} alt={currentUser.name} className="w-full h-full object-cover" />
-                  ) : currentUser ? (
-                    <UserCheck className="w-3.5 h-3.5" />
-                  ) : (
-                    <LogIn className="w-3.5 h-3.5" />
-                  )}
-                </div>
-                <div className="flex flex-col overflow-hidden">
-                  <span className="font-bold text-slate-200 truncate text-[11px]">
-                    {currentUser ? currentUser.name : 'Belum Log In'}
-                  </span>
-                  <span className="text-[10px] text-slate-400 capitalize">
-                    {currentUser ? `${currentUser.role}` : 'Guru / Siswa'}
-                  </span>
-                </div>
-              </div>
-
-              <button
-                onClick={() => {
-                  setIsMobileMenuOpen(false);
-                  onOpenLoginModal();
-                }}
-                className="px-2 py-1 bg-indigo-600/30 hover:bg-indigo-600 text-indigo-300 hover:text-white rounded-lg text-[10px] font-bold border border-indigo-500/30 transition-all cursor-pointer shrink-0"
-              >
-                {currentUser ? 'Akun' : 'Masuk'}
-              </button>
-            </div>
-          </div>
-        )}
       </aside>
     </>
   );

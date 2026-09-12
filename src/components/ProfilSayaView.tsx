@@ -26,6 +26,7 @@ import {
   HeartHandshake,
   RefreshCw,
   Clock,
+  LogOut,
 } from 'lucide-react';
 import { AuthUser, Teacher, Student } from '../types';
 import {
@@ -46,6 +47,7 @@ interface ProfilSayaViewProps {
   students: Student[];
   setStudents: React.Dispatch<React.SetStateAction<Student[]>>;
   onOpenLoginModal: () => void;
+  onLogout?: () => void;
 }
 
 const JABATAN_OPTIONS = [
@@ -65,6 +67,7 @@ export const ProfilSayaView: React.FC<ProfilSayaViewProps> = ({
   students,
   setStudents,
   onOpenLoginModal,
+  onLogout,
 }) => {
   // Common states
   const [photoUrl, setPhotoUrl] = useState('');
@@ -1355,6 +1358,24 @@ export const ProfilSayaView: React.FC<ProfilSayaViewProps> = ({
                 </div>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* Action Logout di Profil Saya */}
+        {onLogout && (
+          <div className="pt-2 flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-slate-800/80">
+            <p className="text-xs text-slate-400">
+              Selesai menggunakan akun ini? Anda dapat keluar kapan saja secara aman.
+            </p>
+            <button
+              type="button"
+              onClick={onLogout}
+              className="w-full sm:w-auto px-5 py-2.5 bg-rose-500/15 hover:bg-rose-500/25 active:bg-rose-500/35 text-rose-300 hover:text-rose-100 border border-rose-500/30 hover:border-rose-500/50 rounded-xl text-xs font-bold inline-flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm"
+              title="Keluar dari akun dan kembali ke menu login"
+            >
+              <LogOut className="w-4 h-4 text-rose-400" />
+              <span>Keluar / Logout Akun</span>
+            </button>
           </div>
         )}
       </form>

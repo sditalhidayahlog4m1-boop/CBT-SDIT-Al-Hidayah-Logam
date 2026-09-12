@@ -45,7 +45,6 @@ import {
 
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
-import { MobileBottomNav } from './components/MobileBottomNav';
 import { LoginModal } from './components/LoginModal';
 import { DashboardView } from './components/DashboardView';
 import { ProfilSayaView } from './components/ProfilSayaView';
@@ -96,6 +95,7 @@ export default function App() {
 
   // User Authentication State
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(getStoredCurrentUser);
+  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(() => !!getStoredCurrentUser());
   const [isLoginModalOpen, setIsLoginModalOpen] = useState<boolean>(() => !getStoredCurrentUser());
 
   // Role Access Permissions State
@@ -423,7 +423,94 @@ export default function App() {
     syncWebFaviconAndLogo(schoolProfile?.logoUrl, name);
   }, [schoolProfile]);
 
-  const handleLogin = (user: AuthUser, rememberMe: boolean = true) => {
+  const handleLogin = (
+    userOrUsername: AuthUser | string,
+    passwordOrRememberMe?: string | boolean,
+    rememberMe: boolean = true
+  ) => {
+    let user: AuthUser | null = null;
+    let shouldRemember = true;
+
+    // Jika dipanggil dengan (username, password) -> Pencarian otomatis di database pengguna
+    if (typeof userOrUsername === 'string') {
+      const inputUsername = userOrUsername.trim().toLowerCase();
+      const inputPassword = typeof passwordOrRememberMe === 'string' ? passwordOrRememberMe.trim() : '';
+      shouldRemember = typeof rememberMe === 'boolean' ? rememberMe : true;
+
+      // 1. Cek Akun Admin
+      const storedAdmin = getStoredAdminAccount();
+      const isAdminMatch =
+        inputUsername === storedAdmin.username.trim().toLowerCase() ||
+        inputUsername === 'admin';
+      const isPassAdminMatch =
+        inputPassword === storedAdmin.password.trim() ||
+        inputPassword.toLowerCase() === storedAdmin.password.trim().toLowerCase() ||
+        (storedAdmin.password.trim() === 'admin' && (inputPassword === 'admin' || inputPassword === 'admin123'));
+
+      if (isAdminMatch && isPassAdminMatch) {
+        user = {
+          role: 'admin',
+          name: storedAdmin.name || 'Administrator System',
+          username: storedAdmin.username,
+          password: storedAdmin.password,
+          photoUrl: storedAdmin.photoUrl || '',
+          birthDate: 'Admin',
+        };
+      }
+
+      // 2. Cek Array Guru (Teachers)
+      if (!user) {
+        const foundTeacher = teachers.find((t) => {
+          const tName = t.name.trim().toLowerCase();
+          const tUser = (t.username || '').trim().toLowerCase();
+          const tNip = (t.nip || '').trim();
+          return tName === inputUsername || tUser === inputUsername || tNip === inputUsername;
+        });
+
+        if (foundTeacher) {
+          user = {
+            role: 'guru',
+            name: foundTeacher.name,
+            username: foundTeacher.username || foundTeacher.name.toLowerCase().replace(/\s+/g, ''),
+            password: foundTeacher.password || foundTeacher.birthDate,
+            photoUrl: foundTeacher.photoUrl,
+            birthDate: foundTeacher.birthDate,
+            details: foundTeacher,
+          };
+        }
+      }
+
+      // 3. Cek Array Siswa (Students)
+      if (!user) {
+        const foundStudent = students.find((s) => {
+          const sName = s.name.trim().toLowerCase();
+          const sUser = (s.username || '').trim().toLowerCase();
+          const sNis = (s.nis || '').trim();
+          const sNisn = (s.nisn || '').trim();
+          return sName === inputUsername || sUser === inputUsername || sNis === inputUsername || sNisn === inputUsername;
+        });
+
+        if (foundStudent) {
+          user = {
+            role: 'siswa',
+            name: foundStudent.name,
+            username: foundStudent.username || foundStudent.name.toLowerCase().replace(/\s+/g, ''),
+            password: foundStudent.password || foundStudent.birthDate,
+            photoUrl: foundStudent.photoUrl,
+            birthDate: foundStudent.birthDate,
+            details: foundStudent,
+          };
+        }
+      }
+
+      if (!user) {
+        return;
+      }
+    } else {
+      user = userOrUsername;
+      shouldRemember = typeof passwordOrRememberMe === 'boolean' ? passwordOrRememberMe : true;
+    }
+
     // Record login event in loginLogs & update lastLogin on user
     const now = new Date();
     const formattedTime = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
@@ -447,7 +534,20 @@ export default function App() {
     };
 
     setCurrentUser(updatedUser);
-    saveStoredCurrentUser(updatedUser, rememberMe);
+    setIsLoggedIn(true);
+    setIsLoginModalOpen(false); // Tutup modal login seketika agar pengguna langsung masuk ke aplikasi
+    saveStoredCurrentUser(updatedUser, shouldRemember);
+    try {
+      localStorage.setItem('cbt_session', JSON.stringify(updatedUser));
+      localStorage.setItem('cbt_user_session', JSON.stringify({
+        id: updatedUser.id,
+        role: updatedUser.role,
+        name: updatedUser.name,
+        timestamp: Date.now(),
+      }));
+    } catch {
+      // ignore
+    }
     setIsMobileMenuOpen(false);
 
     // Update teachers or students list to record lastLogin
@@ -500,42 +600,76 @@ export default function App() {
 
     trackUserLoginInFirestore(newLog);
 
-    if (user.role === 'siswa' || user.role === 'umum') {
-      setActiveTab('profil-saya');
-    }
+    const targetTab = user.role === 'siswa' ? 'mulai-ujian' : user.role === 'guru' ? 'bank-soal' : 'dashboard';
+    setActiveTab(targetTab);
+    replaceNavigationState({
+      tab: targetTab,
+      modal: null,
+      drawer: false,
+      exam: false,
+    });
   };
 
   const handleLogout = () => {
+    // 1. Reset user state & login flag
     setCurrentUser(null);
+    setIsLoggedIn(false);
+
+    // 2. Clear stored user session
     saveStoredCurrentUser(null);
+    try {
+      localStorage.removeItem('cbt_user_session');
+      sessionStorage.removeItem('cbt_user_session');
+      localStorage.removeItem('cbt_current_user');
+      sessionStorage.removeItem('cbt_current_user');
+    } catch {
+      // ignore
+    }
+
+    // 3. Close mobile menu drawer if open
+    setIsMobileMenuOpen(false);
+
+    // 4. Return to main dashboard overview
+    setActiveTab('dashboard');
+
+    // 5. Open login modal / interface immediately to return to login menu
+    setIsLoginModalOpen(true);
   };
 
   // Sync state changes with localStorage, BroadcastChannel & Firestore
   useEffect(() => {
     saveStoredTeachers(teachers);
-    if (hasFinishedInitialSyncRef.current) {
+    if (hasFinishedInitialSyncRef.current && !isDeepEqual(lastSyncedDataRef.current.teachers, teachers)) {
+      lastSyncedDataRef.current.teachers = teachers;
       broadcastAppDataChange({ teachers });
+      saveAppDataToFirestore({ teachers });
     }
   }, [teachers]);
 
   useEffect(() => {
     saveStoredStudents(students);
-    if (hasFinishedInitialSyncRef.current) {
+    if (hasFinishedInitialSyncRef.current && !isDeepEqual(lastSyncedDataRef.current.students, students)) {
+      lastSyncedDataRef.current.students = students;
       broadcastAppDataChange({ students });
+      saveAppDataToFirestore({ students });
     }
   }, [students]);
 
   useEffect(() => {
     saveStoredSubjects(subjects);
-    if (hasFinishedInitialSyncRef.current) {
+    if (hasFinishedInitialSyncRef.current && !isDeepEqual(lastSyncedDataRef.current.subjects, subjects)) {
+      lastSyncedDataRef.current.subjects = subjects;
       broadcastAppDataChange({ subjects });
+      saveAppDataToFirestore({ subjects });
     }
   }, [subjects]);
 
   useEffect(() => {
     saveStoredBanks(banks);
-    if (hasFinishedInitialSyncRef.current) {
+    if (hasFinishedInitialSyncRef.current && !isDeepEqual(lastSyncedDataRef.current.banks, banks)) {
+      lastSyncedDataRef.current.banks = banks;
       broadcastAppDataChange({ banks });
+      saveAppDataToFirestore({ banks });
     }
   }, [banks]);
 
@@ -553,7 +687,8 @@ export default function App() {
 
   useEffect(() => {
     saveStoredDailyGrades(dailyGrades);
-    if (hasFinishedInitialSyncRef.current) {
+    if (hasFinishedInitialSyncRef.current && !isDeepEqual(lastSyncedDataRef.current.dailyGrades, dailyGrades)) {
+      lastSyncedDataRef.current.dailyGrades = dailyGrades;
       broadcastAppDataChange({ dailyGrades });
       saveAppDataToFirestore({ dailyGrades });
     }
@@ -561,22 +696,28 @@ export default function App() {
 
   useEffect(() => {
     saveStoredRolePermissions(rolePermissions);
-    if (hasFinishedInitialSyncRef.current) {
+    if (hasFinishedInitialSyncRef.current && !isDeepEqual(lastSyncedDataRef.current.rolePermissions, rolePermissions)) {
+      lastSyncedDataRef.current.rolePermissions = rolePermissions;
       broadcastAppDataChange({ rolePermissions });
+      saveAppDataToFirestore({ rolePermissions });
     }
   }, [rolePermissions]);
 
   useEffect(() => {
     saveStoredGameData(gameData);
-    if (hasFinishedInitialSyncRef.current) {
+    if (hasFinishedInitialSyncRef.current && !isDeepEqual(lastSyncedDataRef.current.gameData, gameData)) {
+      lastSyncedDataRef.current.gameData = gameData;
       broadcastAppDataChange({ gameData });
+      saveAppDataToFirestore({ gameData });
     }
   }, [gameData]);
 
   useEffect(() => {
     saveStoredSchoolProfile(schoolProfile);
-    if (hasFinishedInitialSyncRef.current) {
+    if (hasFinishedInitialSyncRef.current && !isDeepEqual(lastSyncedDataRef.current.schoolProfile, schoolProfile)) {
+      lastSyncedDataRef.current.schoolProfile = schoolProfile;
       broadcastAppDataChange({ schoolProfile });
+      saveAppDataToFirestore({ schoolProfile });
     }
   }, [schoolProfile]);
 
@@ -721,11 +862,14 @@ export default function App() {
   }, [activeTab]);
 
   const handleCloseLoginModal = useCallback(() => {
+    setIsLoginModalOpen(false);
     const currentState = getCurrentHistoryState();
     if (currentState?.modal === 'login-modal') {
-      window.history.back();
-    } else {
-      setIsLoginModalOpen(false);
+      try {
+        window.history.back();
+      } catch {
+        // ignore
+      }
     }
   }, []);
 
@@ -854,6 +998,7 @@ export default function App() {
         setIsMobileMenuOpen={handleSetMobileMenuOpen}
         currentUser={currentUser}
         onOpenLoginModal={handleOpenLoginModal}
+        onLogout={handleLogout}
         rolePermissions={rolePermissions}
         schoolProfile={schoolProfile}
       />
@@ -868,11 +1013,12 @@ export default function App() {
           setIsMobileMenuOpen={handleSetMobileMenuOpen}
           currentUser={currentUser}
           onOpenLoginModal={handleOpenLoginModal}
+          onLogout={handleLogout}
           schoolProfile={schoolProfile}
         />
 
-        {/* Content Area with Mobile Bottom Nav Padding */}
-        <main className="flex-1 overflow-y-auto custom-scrollbar pb-20 md:pb-6">
+        {/* Content Area */}
+        <main className="flex-1 overflow-y-auto custom-scrollbar pb-6">
           {activeTab === 'dashboard' && (
             <DashboardView
               teachers={teachers}
@@ -897,6 +1043,7 @@ export default function App() {
               students={students}
               setStudents={setStudents}
               onOpenLoginModal={handleOpenLoginModal}
+              onLogout={handleLogout}
             />
           )}
 
@@ -1043,17 +1190,6 @@ export default function App() {
           onLogin={handleLogin}
           onLogout={handleLogout}
           schoolProfile={schoolProfile}
-        />
-
-        {/* Mobile Bottom Navigation Bar */}
-        <MobileBottomNav
-          activeTab={activeTab}
-          setActiveTab={handleNavigateTab}
-          onToggleMobileMenu={() => handleSetMobileMenuOpen(!isMobileMenuOpen)}
-          isMobileMenuOpen={isMobileMenuOpen}
-          currentUser={currentUser}
-          rolePermissions={rolePermissions}
-          onOpenLoginModal={handleOpenLoginModal}
         />
       </div>
     </div>

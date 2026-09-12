@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Clock, UserCheck, ShieldCheck, Wifi, WifiOff, Menu, X, LogIn, GraduationCap, Users } from 'lucide-react';
+import { Clock, UserCheck, ShieldCheck, Wifi, WifiOff, Menu, X, LogIn, GraduationCap, Users, LogOut } from 'lucide-react';
 import { ActiveTab, AuthUser } from '../types';
 import { SchoolProfile } from '../utils/storage';
 
@@ -10,6 +10,7 @@ interface HeaderProps {
   setIsMobileMenuOpen: (open: boolean) => void;
   currentUser: AuthUser | null;
   onOpenLoginModal: () => void;
+  onLogout?: () => void;
   schoolProfile?: SchoolProfile;
 }
 
@@ -95,6 +96,7 @@ export const Header: React.FC<HeaderProps> = ({
   setIsMobileMenuOpen,
   currentUser,
   onOpenLoginModal,
+  onLogout,
   schoolProfile,
 }) => {
   const [isOnline, setIsOnline] = useState<boolean>(
@@ -296,6 +298,18 @@ export const Header: React.FC<HeaderProps> = ({
             </span>
           </div>
         </button>
+
+        {/* Quick Logout Button for logged in users */}
+        {currentUser && onLogout && (
+          <button
+            onClick={onLogout}
+            className="flex items-center gap-1 px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-xl text-xs font-bold text-red-400 hover:text-red-200 bg-red-500/10 hover:bg-red-500/20 active:bg-red-500/30 border border-red-500/30 transition-all cursor-pointer shrink-0 shadow-xs"
+            title="Keluar dari Akun (Logout)"
+          >
+            <LogOut className="w-3.5 h-3.5 text-red-400" />
+            <span className="hidden sm:inline">Keluar</span>
+          </button>
+        )}
       </div>
     </header>
   );

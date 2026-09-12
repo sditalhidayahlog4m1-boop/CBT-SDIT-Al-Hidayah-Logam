@@ -20,7 +20,6 @@ import {
   Globe,
   Settings,
   Save,
-  ChevronDown,
 } from 'lucide-react';
 import { Teacher, Student, AuthUser } from '../types';
 import { SchoolProfile, getStoredAdminAccount, saveStoredAdminAccount, AdminAccount } from '../utils/storage';
@@ -55,7 +54,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     onClose,
   });
 
-  const [roleTab, setRoleTab] = useState<'admin' | 'guru' | 'siswa' | 'umum'>('admin');
   const [usernameInput, setUsernameInput] = useState('');
   const [passwordInput, setPasswordInput] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -211,67 +209,63 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     const cleanUsername = usernameInput.trim();
     const cleanPass = passwordInput.trim();
 
-    if (roleTab === 'umum') {
-      const umumUser: AuthUser = {
-        role: 'umum',
-        name: 'Pengunjung Umum',
-      };
-      onLogin(umumUser, rememberMe);
-      setSuccessMessage('Berhasil masuk sebagai Pengunjung Umum!');
-      setTimeout(() => onClose(), 800);
-      return;
-    }
-
     if (!cleanUsername) {
-      setErrorMessage('Username wajib diisi.');
+      setErrorMessage('Username atau Nama wajib diisi.');
       return;
     }
 
     if (!cleanPass) {
-      setErrorMessage('Password wajib diisi.');
+      setErrorMessage('Password atau Tanggal Lahir wajib diisi.');
       return;
     }
 
-    if (roleTab === 'admin') {
-      const storedAdmin = getStoredAdminAccount();
-      const adminUserClean = storedAdmin.username.trim().toLowerCase();
-      const adminPassClean = storedAdmin.password.trim();
-      const isUsernameAdmin =
-        cleanUsername.toLowerCase() === adminUserClean ||
-        cleanUsername.toLowerCase() === 'admin' ||
-        normalize(cleanUsername) === 'admin';
-      const isPasswordAdmin =
-        cleanPass === adminPassClean ||
-        cleanPass.toLowerCase() === adminPassClean.toLowerCase() ||
-        (adminPassClean === 'admin' && (cleanPass === 'admin' || cleanPass === 'admin123' || cleanPass === 'administrator'));
+    // 1. Deteksi Akun Admin
+    const storedAdmin = getStoredAdminAccount();
+    const adminUserClean = storedAdmin.username.trim().toLowerCase();
+    const adminPassClean = storedAdmin.password.trim();
+    const isUsernameAdmin =
+      cleanUsername.toLowerCase() === adminUserClean ||
+      cleanUsername.toLowerCase() === 'admin' ||
+      normalize(cleanUsername) === 'admin';
+    const isPasswordAdmin =
+      cleanPass === adminPassClean ||
+      cleanPass.toLowerCase() === adminPassClean.toLowerCase() ||
+      (adminPassClean === 'admin' && (cleanPass === 'admin' || cleanPass === 'admin123' || cleanPass === 'administrator'));
 
-      if (isUsernameAdmin && isPasswordAdmin) {
-        const adminUser: AuthUser = {
-          role: 'admin',
-          name: storedAdmin.name || 'Administrator System',
-          username: storedAdmin.username,
-          password: storedAdmin.password,
-          photoUrl: storedAdmin.photoUrl || '',
-          birthDate: 'Admin',
-        };
-        onLogin(adminUser, rememberMe);
-        setSuccessMessage(`Berhasil masuk sebagai ${storedAdmin.name}!`);
-        setTimeout(() => onClose(), 800);
-        return;
-      }
+    if (isUsernameAdmin && isPasswordAdmin) {
+      const adminUser: AuthUser = {
+        role: 'admin',
+        name: storedAdmin.name || 'Administrator System',
+        username: storedAdmin.username,
+        password: storedAdmin.password,
+        photoUrl: storedAdmin.photoUrl || '',
+        birthDate: 'Admin',
+      };
+      setSuccessMessage(`Berhasil masuk sebagai Administrator (${storedAdmin.name})!`);
+      onLogin(adminUser, rememberMe);
+      onClose();
+      return;
+    }
 
-      // Fallback: check if credentials belong to Guru or Siswa
-      const teacherMatch = teachers.find((t) => {
-        const nameClean = t.name.trim().toLowerCase();
-        const userClean = cleanUsername.toLowerCase();
-        const normName = normalize(t.name);
-        const normUser = normalize(cleanUsername);
-        if (nameClean === userClean || (t.username && t.username.trim().toLowerCase() === userClean) || normName === normUser) return true;
-        if (normName.length >= 3 && normUser.length >= 3 && (normName.startsWith(normUser) || normUser.startsWith(normName))) return true;
-        return false;
-      });
+    // 2. Deteksi Akun Guru
+    const teacherMatch = teachers.find((t) => {
+      const nameClean = t.name.trim().toLowerCase();
+      const userClean = cleanUsername.toLowerCase();
+      const normName = normalize(t.name);
+      const normUser = normalize(cleanUsername);
+      if (nameClean === userClean) return true;
+      if (t.username && t.username.trim().toLowerCase() === userClean) return true;
+      if (t.nip && t.nip.trim().toLowerCase() === userClean) return true;
+      if (t.nik && t.nik.trim().toLowerCase() === userClean) return true;
+      if (t.nuptk && t.nuptk.trim().toLowerCase() === userClean) return true;
+      if (normName === normUser) return true;
+      if (normName.length >= 3 && normUser.length >= 3 && (normName.startsWith(normUser) || normUser.startsWith(normName))) return true;
+      return false;
+    });
 
-      if (teacherMatch && checkPasswordOrDateMatch(cleanPass, teacherMatch.password, teacherMatch.birthDate)) {
+    if (teacherMatch) {
+      const isPassValid = checkPasswordOrDateMatch(cleanPass, teacherMatch.password, teacherMatch.birthDate);
+      if (isPassValid) {
         const teacherUser: AuthUser = {
           role: 'guru',
           name: teacherMatch.name,
@@ -281,23 +275,34 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           birthDate: teacherMatch.birthDate,
           details: teacherMatch,
         };
+        setSuccessMessage(`Selamat datang, ${teacherMatch.name}! (Terdeteksi sebagai Guru)`);
         onLogin(teacherUser, rememberMe);
-        setSuccessMessage(`Berhasil masuk sebagai Guru (${teacherMatch.name})!`);
-        setTimeout(() => onClose(), 800);
+        onClose();
+        return;
+      } else {
+        setErrorMessage(`Password atau tanggal lahir salah untuk Guru ${teacherMatch.name}.`);
         return;
       }
+    }
 
-      const studentMatch = students.find((s) => {
-        const nameClean = s.name.trim().toLowerCase();
-        const userClean = cleanUsername.toLowerCase();
-        const normName = normalize(s.name);
-        const normUser = normalize(cleanUsername);
-        if (nameClean === userClean || (s.username && s.username.trim().toLowerCase() === userClean) || normName === normUser) return true;
-        if (normName.length >= 3 && normUser.length >= 3 && (normName.startsWith(normUser) || normUser.startsWith(normName))) return true;
-        return false;
-      });
+    // 3. Deteksi Akun Siswa
+    const studentMatch = students.find((s) => {
+      const nameClean = s.name.trim().toLowerCase();
+      const userClean = cleanUsername.toLowerCase();
+      const normName = normalize(s.name);
+      const normUser = normalize(cleanUsername);
+      if (nameClean === userClean) return true;
+      if (s.username && s.username.trim().toLowerCase() === userClean) return true;
+      if (s.nis && s.nis.trim().toLowerCase() === userClean) return true;
+      if (s.nisn && s.nisn.trim().toLowerCase() === userClean) return true;
+      if (normName === normUser) return true;
+      if (normName.length >= 3 && normUser.length >= 3 && (normName.startsWith(normUser) || normUser.startsWith(normName))) return true;
+      return false;
+    });
 
-      if (studentMatch && checkPasswordOrDateMatch(cleanPass, studentMatch.password, studentMatch.birthDate)) {
+    if (studentMatch) {
+      const isPassValid = checkPasswordOrDateMatch(cleanPass, studentMatch.password, studentMatch.birthDate);
+      if (isPassValid) {
         const studentUser: AuthUser = {
           role: 'siswa',
           name: studentMatch.name,
@@ -307,164 +312,35 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           birthDate: studentMatch.birthDate,
           details: studentMatch,
         };
+        setSuccessMessage(`Selamat datang, ${studentMatch.name}! (Terdeteksi sebagai Siswa)`);
         onLogin(studentUser, rememberMe);
-        setSuccessMessage(`Berhasil masuk sebagai Siswa (${studentMatch.name})!`);
-        setTimeout(() => onClose(), 800);
+        onClose();
+        return;
+      } else {
+        setErrorMessage(`Password atau tanggal lahir salah untuk Siswa ${studentMatch.name}.`);
         return;
       }
+    }
 
-      setErrorMessage('Username atau Password Admin salah. Silakan periksa kembali.');
+    // Jika username cocok admin tapi password salah
+    if (isUsernameAdmin && !isPasswordAdmin) {
+      setErrorMessage('Password Administrator salah. Silakan periksa kembali kata sandi Admin.');
       return;
     }
 
-    if (roleTab === 'guru') {
-      const match = teachers.find((t) => {
-        const nameClean = t.name.trim().toLowerCase();
-        const userClean = cleanUsername.toLowerCase();
-        const normName = normalize(t.name);
-        const normUser = normalize(cleanUsername);
+    // Jika tidak ditemukan di database manapun
+    setErrorMessage(
+      `Akun "${cleanUsername}" tidak ditemukan. Pastikan Username, Nama Lengkap, NIP, atau NISN sudah terdaftar di sistem.`
+    );
+  };
 
-        if (nameClean === userClean) return true;
-        if (t.username && t.username.trim().toLowerCase() === userClean) return true;
-        if (t.nip && t.nip.trim().toLowerCase() === userClean) return true;
-        if (t.nik && t.nik.trim().toLowerCase() === userClean) return true;
-        if (t.nuptk && t.nuptk.trim().toLowerCase() === userClean) return true;
-        if (normName === normUser) return true;
-        if (normName.length >= 3 && normUser.length >= 3) {
-          if (normName.startsWith(normUser) || normUser.startsWith(normName)) return true;
-        }
-        return false;
-      });
-
-      if (!match) {
-        // Fallback: check admin
-        const storedAdmin = getStoredAdminAccount();
-        if (
-          (cleanUsername.toLowerCase() === storedAdmin.username.trim().toLowerCase() || cleanUsername.toLowerCase() === 'admin') &&
-          (cleanPass.trim() === storedAdmin.password.trim() || cleanPass.toLowerCase() === storedAdmin.password.trim().toLowerCase())
-        ) {
-          const adminUser: AuthUser = {
-            role: 'admin',
-            name: storedAdmin.name || 'Administrator System',
-            username: storedAdmin.username,
-            password: storedAdmin.password,
-            photoUrl: storedAdmin.photoUrl || '',
-            birthDate: 'Admin',
-          };
-          onLogin(adminUser, rememberMe);
-          setSuccessMessage(`Berhasil masuk sebagai ${storedAdmin.name}!`);
-          setTimeout(() => onClose(), 800);
-          return;
-        }
-
-        setErrorMessage(
-          `Nama Guru / Username "${cleanUsername}" tidak ditemukan. Silakan cek daftar guru terdaftar.`
-        );
-        return;
-      }
-
-      // Check Password (Custom Password atau Tanggal Lahir)
-      const passMatch = checkPasswordOrDateMatch(
-        cleanPass,
-        match.password,
-        match.birthDate
-      );
-
-      if (!passMatch) {
-        setErrorMessage(
-          `Password / Tanggal lahir salah untuk Guru ${match.name}.`
-        );
-        return;
-      }
-
-      const teacherUser: AuthUser = {
-        role: 'guru',
-        name: match.name,
-        username: match.username || match.name.toLowerCase().replace(/\s+/g, ''),
-        password: match.password || match.birthDate,
-        photoUrl: match.photoUrl,
-        birthDate: match.birthDate,
-        details: match,
-      };
-      onLogin(teacherUser, rememberMe);
-      setSuccessMessage(`Selamat datang, ${match.name}! (Guru/Pengajar)`);
-      setTimeout(() => onClose(), 800);
-      return;
-    }
-
-    if (roleTab === 'siswa') {
-      const match = students.find((s) => {
-        const nameClean = s.name.trim().toLowerCase();
-        const userClean = cleanUsername.toLowerCase();
-        const normName = normalize(s.name);
-        const normUser = normalize(cleanUsername);
-
-        if (nameClean === userClean) return true;
-        if (s.username && s.username.trim().toLowerCase() === userClean) return true;
-        if (s.nis && s.nis.trim().toLowerCase() === userClean) return true;
-        if (s.nisn && s.nisn.trim().toLowerCase() === userClean) return true;
-        if (normName === normUser) return true;
-        if (normName.length >= 3 && normUser.length >= 3) {
-          if (normName.startsWith(normUser) || normUser.startsWith(normName)) return true;
-        }
-        return false;
-      });
-
-      if (!match) {
-        // Fallback: check admin
-        const storedAdmin = getStoredAdminAccount();
-        if (
-          (cleanUsername.toLowerCase() === storedAdmin.username.trim().toLowerCase() || cleanUsername.toLowerCase() === 'admin') &&
-          (cleanPass.trim() === storedAdmin.password.trim() || cleanPass.toLowerCase() === storedAdmin.password.trim().toLowerCase())
-        ) {
-          const adminUser: AuthUser = {
-            role: 'admin',
-            name: storedAdmin.name || 'Administrator System',
-            username: storedAdmin.username,
-            password: storedAdmin.password,
-            photoUrl: storedAdmin.photoUrl || '',
-            birthDate: 'Admin',
-          };
-          onLogin(adminUser, rememberMe);
-          setSuccessMessage(`Berhasil masuk sebagai ${storedAdmin.name}!`);
-          setTimeout(() => onClose(), 800);
-          return;
-        }
-
-        setErrorMessage(
-          `Nama Siswa / Username "${cleanUsername}" tidak ditemukan. Silakan cek daftar siswa terdaftar.`
-        );
-        return;
-      }
-
-      // Check Password (Custom Password atau Tanggal Lahir)
-      const passMatch = checkPasswordOrDateMatch(
-        cleanPass,
-        match.password,
-        match.birthDate
-      );
-
-      if (!passMatch) {
-        setErrorMessage(
-          `Password / Tanggal lahir salah untuk Siswa ${match.name}.`
-        );
-        return;
-      }
-
-      const studentUser: AuthUser = {
-        role: 'siswa',
-        name: match.name,
-        username: match.username || match.name.toLowerCase().replace(/\s+/g, ''),
-        password: match.password || match.birthDate,
-        photoUrl: match.photoUrl,
-        birthDate: match.birthDate,
-        details: match,
-      };
-      onLogin(studentUser, rememberMe);
-      setSuccessMessage(`Selamat datang, ${match.name}! (Siswa)`);
-      setTimeout(() => onClose(), 800);
-      return;
-    }
+  const handleLoginAsGuest = () => {
+    const umumUser: AuthUser = {
+      role: 'umum',
+      name: 'Pengunjung Umum',
+    };
+    onLogin(umumUser, rememberMe);
+    onClose();
   };
 
   const handleSaveAdminProfile = (e: React.FormEvent) => {
@@ -536,11 +412,9 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   };
 
   const handleQuickFillAccount = (
-    role: 'guru' | 'siswa',
     name: string,
     birthDate: string
   ) => {
-    setRoleTab(role);
     setUsernameInput(name);
     setPasswordInput(birthDate);
     setErrorMessage(null);
@@ -818,179 +692,124 @@ export const LoginModal: React.FC<LoginModalProps> = ({
             </div>
           )}
 
-          {/* Role Choice Section (Dropdown Select Ramping) */}
-          <div className="space-y-2">
-            <label className="block text-xs font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
-              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-              <span>Pilih Peran Log In</span>
-            </label>
-
-            <div className="relative">
-              <select
-                value={roleTab}
-                onChange={(e) => {
-                  setRoleTab(e.target.value as 'admin' | 'guru' | 'siswa' | 'umum');
-                  setErrorMessage(null);
-                }}
-                className="w-full px-4 py-3 bg-slate-950 text-slate-100 font-bold rounded-xl border border-slate-700 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 appearance-none cursor-pointer pr-10 shadow-inner"
-              >
-                <option value="admin" className="bg-slate-900 text-slate-100 py-1.5">🛡️ Admin</option>
-                <option value="guru" className="bg-slate-900 text-slate-100 py-1.5">👨‍🏫 Guru</option>
-                <option value="siswa" className="bg-slate-900 text-slate-100 py-1.5">👨‍🎓 Siswa</option>
-                <option value="umum" className="bg-slate-900 text-slate-100 py-1.5">👥 Umum</option>
-              </select>
-              <div className="absolute right-3.5 top-3.5 pointer-events-none text-amber-400">
-                <ChevronDown className="w-4 h-4" />
-              </div>
-            </div>
-          </div>
-
           {/* Alert Messages */}
-            {errorMessage && (
-              <div className="p-4 bg-rose-500/10 border-2 border-rose-500/40 rounded-2xl text-xs text-rose-300 flex items-center gap-3 animate-shake shadow-lg">
-                <AlertCircle className="w-5 h-5 text-rose-400 shrink-0" />
-                <span className="font-semibold">{errorMessage}</span>
+          {errorMessage && (
+            <div className="p-4 bg-rose-500/10 border-2 border-rose-500/40 rounded-2xl text-xs text-rose-300 flex items-center gap-3 animate-shake shadow-lg">
+              <AlertCircle className="w-5 h-5 text-rose-400 shrink-0" />
+              <span className="font-semibold">{errorMessage}</span>
+            </div>
+          )}
+
+          {successMessage && (
+            <div className="p-4 bg-emerald-500/10 border-2 border-emerald-500/40 rounded-2xl text-xs text-emerald-300 flex items-center gap-3 shadow-lg">
+              <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+              <span className="font-semibold">{successMessage}</span>
+            </div>
+          )}
+
+          {/* Form Login Otomatis Tanpa Pilihan Role */}
+          <div className="p-5 sm:p-6 rounded-2xl border border-amber-500/30 bg-gradient-to-b from-slate-900/90 to-slate-950 shadow-xl space-y-4">
+            <div className="flex items-center gap-2 pb-2 border-b border-slate-800">
+              <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+              <p className="text-xs text-slate-300 font-medium leading-relaxed">
+                Silakan masukkan kredensial akun Anda. Sistem akan <span className="text-amber-400 font-bold">mendeteksi peran (Admin, Guru, atau Siswa) secara otomatis</span>.
+              </p>
+            </div>
+
+            <form onSubmit={handleLoginSubmit} className="space-y-4 pt-1">
+              {/* Username Field */}
+              <div>
+                <label className="block text-xs font-bold text-slate-200 mb-1.5 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <User className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Username / Nama Lengkap</span>
+                  </span>
+                  <span className="text-[10px] text-amber-300 font-mono font-semibold bg-amber-400/10 px-2 py-0.5 rounded-md border border-amber-400/20">
+                    Admin / Guru / Siswa
+                  </span>
+                </label>
+                <div className="relative">
+                  <User className="w-4 h-4 text-slate-500 absolute left-3.5 top-3.5" />
+                  <input
+                    type="text"
+                    value={usernameInput}
+                    onChange={(e) => setUsernameInput(e.target.value)}
+                    placeholder="Masukkan username, nama lengkap, NIP, atau NISN"
+                    className="w-full pl-10 pr-4 py-3 bg-slate-900/90 border border-slate-700 text-slate-100 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-amber-400 transition-all font-semibold placeholder:text-slate-500"
+                    required
+                  />
+                </div>
               </div>
-            )}
 
-            {successMessage && (
-              <div className="p-4 bg-emerald-500/10 border-2 border-emerald-500/40 rounded-2xl text-xs text-emerald-300 flex items-center gap-3 shadow-lg">
-                <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
-                <span className="font-semibold">{successMessage}</span>
-              </div>
-            )}
-
-            {/* Form Inputs Container per Role */}
-            <div className={`p-5 rounded-2xl border transition-all ${
-              roleTab === 'guru'
-                ? 'bg-gradient-to-b from-indigo-950/30 to-slate-950 border-indigo-500/30'
-                : roleTab === 'siswa'
-                ? 'bg-gradient-to-b from-emerald-950/30 to-slate-950 border-emerald-500/30'
-                : roleTab === 'umum'
-                ? 'bg-gradient-to-b from-sky-950/30 to-slate-950 border-sky-500/30'
-                : 'bg-gradient-to-b from-amber-950/30 to-slate-950 border-amber-500/30'
-            }`}>
-
-              {roleTab === 'umum' ? (
-                <div className="space-y-4 py-2 text-center">
-                  <div className="w-12 h-12 rounded-2xl bg-sky-500/20 text-sky-300 border border-sky-400/30 flex items-center justify-center mx-auto shadow-inner">
-                    <Globe className="w-6 h-6" />
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-bold text-white">Akses Pengunjung Umum</h4>
-                    <p className="text-xs text-slate-300 mt-1 max-w-md mx-auto leading-relaxed">
-                      Mode umum memberikan akses baca untuk informasi profil sekolah, permainan edukasi interaktif, dan navigasi informasi umum sekolah tanpa batasan kata sandi.
-                    </p>
-                  </div>
+              {/* Password Field */}
+              <div>
+                <label className="block text-xs font-bold text-slate-200 mb-1.5 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <KeyRound className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Password / Kata Sandi</span>
+                  </span>
+                  <span className="text-[10px] text-amber-300 font-mono font-semibold bg-amber-400/10 px-2 py-0.5 rounded-md border border-amber-400/20">
+                    Password / Tanggal Lahir (DDMMYYYY)
+                  </span>
+                </label>
+                <div className="relative">
+                  <KeyRound className="w-4 h-4 text-slate-500 absolute left-3.5 top-3.5" />
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    value={passwordInput}
+                    onChange={(e) => setPasswordInput(e.target.value)}
+                    placeholder="Masukkan password atau tanggal lahir (contoh: 25081995)"
+                    className="w-full pl-10 pr-10 py-3 bg-slate-900/90 border border-slate-700 text-slate-100 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-amber-400 transition-all font-semibold placeholder:text-slate-500"
+                    required
+                  />
                   <button
                     type="button"
-                    onClick={handleLoginSubmit}
-                    className="w-full py-3.5 bg-gradient-to-r from-sky-400 via-blue-500 to-sky-400 hover:from-sky-300 hover:to-blue-400 text-slate-950 font-black rounded-xl text-xs shadow-xl flex items-center justify-center gap-2 transition-all cursor-pointer"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3.5 top-3 text-slate-500 hover:text-slate-300 cursor-pointer"
                   >
-                    <LogIn className="w-4 h-4 text-slate-950" />
-                    <span>MASUK SEBAGAI PENGUNJUNG UMUM</span>
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
                 </div>
-              ) : (
-                <form onSubmit={handleLoginSubmit} className="space-y-4">
-                  {/* Username Field */}
-                  <div>
-                    <label className="block text-xs font-bold text-slate-200 mb-1.5 flex items-center justify-between">
-                      <span className="flex items-center gap-1.5">
-                        <User className="w-3.5 h-3.5 text-amber-400" />
-                        <span>Username {roleTab === 'admin' ? 'Admin' : ' (Nama Lengkap)'}</span>
-                      </span>
-                      <span className="text-[10px] text-amber-300/80 font-mono font-semibold bg-amber-400/10 px-2 py-0.5 rounded-md border border-amber-400/20">
-                      </span>
-                    </label>
-                    <div className="relative">
-                      <User className="w-4 h-4 text-slate-500 absolute left-3.5 top-3.5" />
-                      <input
-                        type="text"
-                        value={usernameInput}
-                        onChange={(e) => setUsernameInput(e.target.value)}
-                        placeholder={
-                          roleTab === 'guru' || roleTab === 'siswa'
-                            ? 'Contoh : Tsubatsa Ozora'
-                            : 'Contoh : admin'
-                        }
-                        className="w-full pl-10 pr-4 py-3 bg-slate-900/90 border border-slate-700 text-slate-100 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-amber-400 transition-all font-semibold placeholder:text-slate-500"
-                        required
-                      />
-                    </div>
-                  </div>
+              </div>
 
-                  {/* Password Field */}
-                  <div>
-                    <label className="block text-xs font-bold text-slate-200 mb-1.5 flex items-center justify-between">
-                      <span className="flex items-center gap-1.5">
-                        <KeyRound className="w-3.5 h-3.5 text-amber-400" />
-                        <span>Password {roleTab !== 'admin' && '(Tanggal Lahir / Password: DD/MM/YYYY)'}</span>
-                      </span>
-                      {roleTab !== 'admin' && (
-                        <span className="text-[10px] text-amber-300/80 font-mono font-semibold bg-amber-400/10 px-2 py-0.5 rounded-md border border-amber-400/20">
-                          DDMMYYYY / Tanggal Lahir
-                        </span>
-                      )}
-                    </label>
-                    <div className="relative">
-                      <KeyRound className="w-4 h-4 text-slate-500 absolute left-3.5 top-3.5" />
-                      <input
-                        type={showPassword ? 'text' : 'password'}
-                        value={passwordInput}
-                        onChange={(e) => setPasswordInput(e.target.value)}
-                        placeholder={
-                          roleTab === 'admin'
-                            ? 'Masukkan Password Admin'
-                            : 'Contoh : 25081991 atau 25/08/1991'
-                        }
-                        className="w-full pl-10 pr-10 py-3 bg-slate-900/90 border border-slate-700 text-slate-100 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-amber-400 transition-all font-semibold placeholder:text-slate-500"
-                        required
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowPassword(!showPassword)}
-                        className="absolute right-3.5 top-3 text-slate-500 hover:text-slate-300 cursor-pointer"
-                      >
-                        {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                      </button>
-                    </div>
-                  </div>
+              {/* Remember Me / Ingat Saya Checkbox */}
+              <div className="flex items-center justify-between pt-0.5 pb-1">
+                <label className="flex items-center gap-2 cursor-pointer select-none text-xs font-semibold text-slate-300 hover:text-white">
+                  <input
+                    type="checkbox"
+                    checked={rememberMe}
+                    onChange={(e) => setRememberMe(e.target.checked)}
+                    className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-amber-400 focus:ring-amber-400 accent-amber-400 cursor-pointer"
+                  />
+                  <span className="text-[11px] sm:text-xs">Ingat Saya (Tetap Masuk Otomatis)</span>
+                </label>
+                <span className="text-[10px] text-slate-400 font-medium hidden sm:inline">
+                  Sesi tersimpan aman
+                </span>
+              </div>
 
-                  {/* Remember Me / Ingat Saya Checkbox */}
-                  <div className="flex items-center justify-between pt-0.5 pb-1">
-                    <label className="flex items-center gap-2 cursor-pointer select-none text-xs font-semibold text-slate-300 hover:text-white">
-                      <input
-                        type="checkbox"
-                        checked={rememberMe}
-                        onChange={(e) => setRememberMe(e.target.checked)}
-                        className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-amber-400 focus:ring-amber-400 accent-amber-400 cursor-pointer"
-                      />
-                      <span className="text-[11px] sm:text-xs">Ingat Saya (Tetap Masuk Otomatis)</span>
-                    </label>
-                    <span className="text-[10px] text-slate-400 font-medium hidden sm:inline">
-                      Sesi tersimpan aman
-                    </span>
-                  </div>
+              {/* Submit Button */}
+              <button
+                type="submit"
+                className="w-full py-3.5 rounded-xl font-extrabold text-xs text-slate-950 shadow-xl flex items-center justify-center gap-2 cursor-pointer transition-all bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-500 hover:from-amber-300 hover:to-yellow-300 shadow-amber-400/30 active:scale-[0.99]"
+              >
+                <LogIn className="w-4 h-4 text-slate-950" />
+                <span>MASUK KE SISTEM</span>
+              </button>
+            </form>
 
-                  <button
-                    type="submit"
-                    className={`w-full py-3.5 rounded-xl font-extrabold text-xs text-slate-950 shadow-xl flex items-center justify-center gap-2 cursor-pointer transition-all ${
-                      roleTab === 'guru'
-                        ? 'bg-gradient-to-r from-amber-400 via-amber-300 to-yellow-400 hover:from-amber-300 hover:to-yellow-300 shadow-amber-400/25'
-                        : roleTab === 'siswa'
-                        ? 'bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-300 hover:from-amber-300 hover:to-yellow-200 shadow-amber-400/25'
-                        : 'bg-gradient-to-r from-amber-400 to-yellow-500 hover:from-amber-300 hover:to-yellow-400 shadow-amber-400/30'
-                    }`}
-                  >
-                    <LogIn className="w-4 h-4 text-slate-950" />
-                    <span>
-                      LOG IN SEBAGAI {roleTab === 'guru' ? 'GURU' : roleTab === 'siswa' ? 'SISWA' : 'ADMINISTRATOR'}
-                    </span>
-                  </button>
-                </form>
-              )}
+            {/* Quick Guest / Umum Access */}
+            <div className="pt-3 border-t border-slate-800 text-center">
+              <button
+                type="button"
+                onClick={handleLoginAsGuest}
+                className="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-sky-300 transition-colors font-semibold cursor-pointer"
+              >
+                <Globe className="w-3.5 h-3.5 text-sky-400" />
+                <span>Masuk sebagai Pengunjung Umum (Tanpa Akun)</span>
+              </button>
             </div>
+          </div>
 
           {/* Quick Account Helper for Registered Teachers/Students - Khusus Admin */}
           {currentUser?.role === 'admin' && (
@@ -1034,7 +853,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                           key={t.id}
                           type="button"
                           onClick={() => {
-                            setRoleTab('guru');
                             setUsernameInput(t.name);
                             setPasswordInput(t.password || t.birthDate || '');
                             setErrorMessage(null);
@@ -1061,7 +879,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                           key={s.id}
                           type="button"
                           onClick={() => {
-                            setRoleTab('siswa');
                             setUsernameInput(s.name);
                             setPasswordInput(s.password || s.birthDate || '');
                             setErrorMessage(null);

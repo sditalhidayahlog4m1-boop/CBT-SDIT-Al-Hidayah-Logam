@@ -48,9 +48,20 @@ export function getFirestoreDb(): Firestore | null {
   if (firestoreDb) return firestoreDb;
 
   try {
-    const config = firebaseConfigRaw as any;
-    if (!config || !config.apiKey || !config.projectId) {
-      console.warn('[Firebase] Config is incomplete or missing in firebase-applet-config.json.');
+    const raw = (firebaseConfigRaw || {}) as any;
+    const metaEnv = (import.meta as any).env || {};
+    const config = {
+      apiKey: metaEnv.VITE_FIREBASE_API_KEY || raw.apiKey,
+      authDomain: metaEnv.VITE_FIREBASE_AUTH_DOMAIN || raw.authDomain,
+      projectId: metaEnv.VITE_FIREBASE_PROJECT_ID || raw.projectId,
+      storageBucket: metaEnv.VITE_FIREBASE_STORAGE_BUCKET || raw.storageBucket,
+      messagingSenderId: metaEnv.VITE_FIREBASE_MESSAGING_SENDER_ID || raw.messagingSenderId,
+      appId: metaEnv.VITE_FIREBASE_APP_ID || raw.appId,
+      firestoreDatabaseId: metaEnv.VITE_FIRESTORE_DATABASE_ID || raw.firestoreDatabaseId,
+    };
+
+    if (!config.apiKey || !config.projectId) {
+      console.warn('[Firebase] Config is incomplete or missing in firebase-applet-config.json / env.');
       return null;
     }
 
