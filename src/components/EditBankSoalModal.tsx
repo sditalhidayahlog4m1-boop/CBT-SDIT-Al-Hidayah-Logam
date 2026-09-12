@@ -37,18 +37,16 @@ export const EditBankSoalModal: React.FC<EditBankSoalModalProps> = ({
   onClose,
   onSave,
 }) => {
-  if (!isOpen || !bank) return null;
-
   // Metadata states
-  const [title, setTitle] = useState(bank.title || '');
-  const [subject, setSubject] = useState(bank.subject || '');
-  const [teacherName, setTeacherName] = useState(bank.teacher_name || '');
-  const [gradeLevel, setGradeLevel] = useState(bank.grade_level || 'SD / MI');
-  const [classRoom, setClassRoom] = useState(bank.class_room || 'Semua Kelas');
-  const [token, setToken] = useState(bank.token || '');
-  const [durationMinutes, setDurationMinutes] = useState(bank.durationMinutes || 45);
+  const [title, setTitle] = useState(bank?.title || '');
+  const [subject, setSubject] = useState(bank?.subject || '');
+  const [teacherName, setTeacherName] = useState(bank?.teacher_name || '');
+  const [gradeLevel, setGradeLevel] = useState(bank?.grade_level || 'SD / MI');
+  const [classRoom, setClassRoom] = useState(bank?.class_room || 'Semua Kelas');
+  const [token, setToken] = useState(bank?.token || '');
+  const [durationMinutes, setDurationMinutes] = useState(bank?.durationMinutes || 45);
   const [minWorkingMinutes, setMinWorkingMinutes] = useState(
-    bank.minWorkingMinutes !== undefined ? bank.minWorkingMinutes : 30
+    bank?.minWorkingMinutes !== undefined ? bank.minWorkingMinutes : 30
   );
 
   // Questions state
@@ -59,7 +57,7 @@ export const EditBankSoalModal: React.FC<EditBankSoalModalProps> = ({
 
   // Initialize questions on bank change
   useEffect(() => {
-    if (bank) {
+    if (isOpen && bank) {
       setTitle(bank.title || '');
       setSubject(bank.subject || '');
       setTeacherName(bank.teacher_name || '');
@@ -111,7 +109,7 @@ export const EditBankSoalModal: React.FC<EditBankSoalModalProps> = ({
           : 0
       );
     }
-  }, [bank, initialQuestionIndex]);
+  }, [isOpen, bank, initialQuestionIndex]);
 
   // Handle Upload Image for Question
   const handleUploadGambarSoal = (index: number, event: React.ChangeEvent<HTMLInputElement>) => {
@@ -328,6 +326,8 @@ export const EditBankSoalModal: React.FC<EditBankSoalModalProps> = ({
     onSave(updatedBank);
     onClose();
   };
+
+  if (!isOpen || !bank) return null;
 
   const currentQ = questions[activeQIndex] || null;
 
