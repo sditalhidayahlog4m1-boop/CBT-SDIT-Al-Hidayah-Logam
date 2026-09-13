@@ -76,11 +76,13 @@ import {
   syncGameLogToFirestore,
   deleteGameLogFromFirestore,
   clearAllGameLogsInFirestore,
+  isBankDeletedLocally,
   AppData,
 } from './utils/firebaseSync';
 import { subscribeToLocalSync, broadcastAppDataChange } from './utils/syncEngine';
 import { isDeepEqual } from './utils/deepEqual';
 import { autoSyncBanksWithSubjects } from './utils/subjectMatcher';
+import { authenticateUser, cleanAlphanumeric } from './utils/authMatcher';
 import {
   getCurrentHistoryState,
   pushNavigationState,
@@ -229,11 +231,11 @@ export default function App() {
     }
     if (Array.isArray(data.banks)) {
       const isRecentlyEditedLocally = Date.now() - lastLocalBankEditTimeRef.current < 25000;
-      let mergedBanks = [...data.banks];
+      let mergedBanks = data.banks.filter((b) => b && b.id && !isBankDeletedLocally(b.id));
 
       if (isRecentlyEditedLocally) {
         // Protect locally edited banks from being overwritten by stale remote polling/snapshots
-        const localBanks = banksRef.current || [];
+        const localBanks = (banksRef.current || []).filter((b) => !isBankDeletedLocally(b.id));
         mergedBanks = mergedBanks.map((remoteB) => {
           const localB = localBanks.find((l) => l.id === remoteB.id);
           if (localB) {
@@ -246,9 +248,9 @@ export default function App() {
           return remoteB;
         });
 
-        // Ensure any local banks not yet present in remote are preserved
+        // Ensure any local banks not yet present in remote are preserved (unless deleted)
         localBanks.forEach((l) => {
-          if (!mergedBanks.some((m) => m.id === l.id)) {
+          if (!isBankDeletedLocally(l.id) && !mergedBanks.some((m) => m.id === l.id)) {
             mergedBanks.push(l);
           }
         });
@@ -260,6 +262,9 @@ export default function App() {
         const { updatedBanks } = autoSyncBanksWithSubjects(mergedBanks, curSubjects);
         mergedBanks = updatedBanks;
       }
+
+      // Ensure no deleted bank slips through
+      mergedBanks = mergedBanks.filter((b) => b && b.id && !isBankDeletedLocally(b.id));
 
       if (!isDeepEqual(banksRef.current, mergedBanks)) {
         setBanks(mergedBanks);
@@ -472,19 +477,28 @@ export default function App() {
 
     // Jika dipanggil dengan (username, password) -> Pencarian otomatis di database pengguna
     if (typeof userOrUsername === 'string') {
-      const inputUsername = userOrUsername.trim().toLowerCase();
+      const inputUsername = userOrUsername.trim();
       const inputPassword = typeof passwordOrRememberMe === 'string' ? passwordOrRememberMe.trim() : '';
       shouldRemember = typeof rememberMe === 'boolean' ? rememberMe : true;
 
       // 1. Cek Akun Admin
       const storedAdmin = getStoredAdminAccount();
+      const adminUserClean = storedAdmin.username.trim().toLowerCase();
+      const adminPassClean = storedAdmin.password.trim();
+      const cleanUserNorm = inputUsername.toLowerCase();
+
       const isAdminMatch =
-        inputUsername === storedAdmin.username.trim().toLowerCase() ||
-        inputUsername === 'admin';
+        cleanUserNorm === adminUserClean ||
+        cleanUserNorm === 'admin' ||
+        cleanAlphanumeric(inputUsername) === 'admin';
+
       const isPassAdminMatch =
-        inputPassword === storedAdmin.password.trim() ||
-        inputPassword.toLowerCase() === storedAdmin.password.trim().toLowerCase() ||
-        (storedAdmin.password.trim() === 'admin' && (inputPassword === 'admin' || inputPassword === 'admin123'));
+        inputPassword === adminPassClean ||
+        inputPassword.toLowerCase() === adminPassClean.toLowerCase() ||
+        (adminPassClean.toLowerCase() === 'admin' &&
+          (inputPassword.toLowerCase() === 'admin' ||
+            inputPassword.toLowerCase() === 'admin123' ||
+            inputPassword.toLowerCase() === 'administrator'));
 
       if (isAdminMatch && isPassAdminMatch) {
         user = {
@@ -497,48 +511,11 @@ export default function App() {
         };
       }
 
-      // 2. Cek Array Guru (Teachers)
+      // 2. Cek Guru & Siswa via flexible authMatcher
       if (!user) {
-        const foundTeacher = teachers.find((t) => {
-          const tName = t.name.trim().toLowerCase();
-          const tUser = (t.username || '').trim().toLowerCase();
-          const tNip = (t.nip || '').trim();
-          return tName === inputUsername || tUser === inputUsername || tNip === inputUsername;
-        });
-
-        if (foundTeacher) {
-          user = {
-            role: 'guru',
-            name: foundTeacher.name,
-            username: foundTeacher.username || foundTeacher.name.toLowerCase().replace(/\s+/g, ''),
-            password: foundTeacher.password || foundTeacher.birthDate,
-            photoUrl: foundTeacher.photoUrl,
-            birthDate: foundTeacher.birthDate,
-            details: foundTeacher,
-          };
-        }
-      }
-
-      // 3. Cek Array Siswa (Students)
-      if (!user) {
-        const foundStudent = students.find((s) => {
-          const sName = s.name.trim().toLowerCase();
-          const sUser = (s.username || '').trim().toLowerCase();
-          const sNis = (s.nis || '').trim();
-          const sNisn = (s.nisn || '').trim();
-          return sName === inputUsername || sUser === inputUsername || sNis === inputUsername || sNisn === inputUsername;
-        });
-
-        if (foundStudent) {
-          user = {
-            role: 'siswa',
-            name: foundStudent.name,
-            username: foundStudent.username || foundStudent.name.toLowerCase().replace(/\s+/g, ''),
-            password: foundStudent.password || foundStudent.birthDate,
-            photoUrl: foundStudent.photoUrl,
-            birthDate: foundStudent.birthDate,
-            details: foundStudent,
-          };
+        const authResult = authenticateUser(inputUsername, inputPassword, teachers, students);
+        if (authResult.authenticatedUser) {
+          user = authResult.authenticatedUser;
         }
       }
 

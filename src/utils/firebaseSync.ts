@@ -35,6 +35,33 @@ const locallyDeletedLogIds = new Set<string>();
 const locallyDeletedResultIds = new Set<string>();
 const locallyDeletedLoginLogIds = new Set<string>();
 
+// Known legacy/bawaan sample bank IDs to always purge
+const DEFAULT_PURGED_BANK_IDS = ['bank-ext-1787720366170', 'bank-ext-1787717409106'];
+const locallyDeletedBankIds = new Set<string>(DEFAULT_PURGED_BANK_IDS);
+
+// Load any previously persisted deleted bank IDs from localStorage
+try {
+  const savedDeletedBanks = JSON.parse(localStorage.getItem('cbt_deleted_bank_ids') || '[]');
+  if (Array.isArray(savedDeletedBanks)) {
+    savedDeletedBanks.forEach((id) => locallyDeletedBankIds.add(id));
+  }
+} catch {}
+
+export function recordDeletedBankId(id: string) {
+  if (id) {
+    locallyDeletedBankIds.add(id);
+    try {
+      const arr = Array.from(locallyDeletedBankIds);
+      localStorage.setItem('cbt_deleted_bank_ids', JSON.stringify(arr));
+    } catch {}
+  }
+}
+
+export function isBankDeletedLocally(id: string): boolean {
+  if (!id) return false;
+  return locallyDeletedBankIds.has(id);
+}
+
 export function recordDeletedGameLogId(id: string) {
   if (id) locallyDeletedLogIds.add(id);
 }
@@ -236,6 +263,10 @@ export async function fetchAppDataFromFirestore(silent = true): Promise<AppData 
     data.gameLogs = gameLogsFromCollection;
     data.loginLogs = loginLogsFromCollection;
 
+    if (Array.isArray(data.banks)) {
+      data.banks = data.banks.filter((b) => b && b.id && !isBankDeletedLocally(b.id));
+    }
+
     return data;
   } catch (err: any) {
     if (!silent) {
@@ -256,6 +287,11 @@ export async function saveAppDataToFirestore(data: Partial<AppData>): Promise<bo
   try {
     // Clone and separate master data from dynamic high-volume items
     const { results, gameLogs, loginLogs, ...masterData } = data;
+
+    // Strict guard: ensure deleted banks are never written to Firestore
+    if (Array.isArray(masterData.banks)) {
+      masterData.banks = masterData.banks.filter((b) => b && b.id && !isBankDeletedLocally(b.id));
+    }
 
     const docRef = doc(db, MAIN_COLLECTION, MAIN_DOCUMENT);
     const payload = {
@@ -339,6 +375,9 @@ export function subscribeToAppData(
         if (snap.exists()) {
           const raw = snap.data() as AppData;
           const { results, gameLogs, loginLogs, ...restMaster } = raw;
+          if (Array.isArray(restMaster.banks)) {
+            restMaster.banks = restMaster.banks.filter((b) => b && b.id && !isBankDeletedLocally(b.id));
+          }
           currentMaster = restMaster;
           emitConsolidated(snap.metadata.hasPendingWrites);
         }
@@ -747,7 +786,18 @@ export async function deleteSubjectPermanently(subjectId: string, currentSubject
 }
 
 export async function deleteBankSoalPermanently(bankId: string, currentBanks: QuestionBank[]): Promise<QuestionBank[]> {
-  const updated = currentBanks.filter((b) => b.id !== bankId);
+  recordDeletedBankId(bankId);
+  const updated = currentBanks.filter((b) => b.id !== bankId && !isBankDeletedLocally(b.id));
+  try {
+    localStorage.setItem('cbt_banks', JSON.stringify(updated));
+  } catch {}
+  await saveAppDataToFirestore({ banks: updated });
+  return updated;
+}
+
+export async function deleteBanksBulkPermanently(bankIds: string[], currentBanks: QuestionBank[]): Promise<QuestionBank[]> {
+  bankIds.forEach((id) => recordDeletedBankId(id));
+  const updated = currentBanks.filter((b) => !bankIds.includes(b.id) && !isBankDeletedLocally(b.id));
   try {
     localStorage.setItem('cbt_banks', JSON.stringify(updated));
   } catch {}

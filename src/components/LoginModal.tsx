@@ -25,6 +25,12 @@ import { Teacher, Student, AuthUser } from '../types';
 import { SchoolProfile, getStoredAdminAccount, saveStoredAdminAccount, AdminAccount } from '../utils/storage';
 import { broadcastAppDataChange } from '../utils/syncEngine';
 import { useHistoryModal } from '../utils/navigationHistory';
+import {
+  authenticateUser,
+  checkPasswordOrDateMatch,
+  cleanAlphanumeric,
+  normalizeString,
+} from '../utils/authMatcher';
 
 interface LoginModalProps {
   isOpen: boolean;
@@ -85,122 +91,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({
 
   if (!isOpen) return null;
 
-  // Helper to normalize strings for comparisons
-  const normalize = (str: string) => str.toLowerCase().replace(/[^a-z0-9]/g, '');
-
-  const checkPasswordOrDateMatch = (
-    cleanPass: string,
-    storedPass?: string,
-    storedBirthDate?: string
-  ): boolean => {
-    if (!cleanPass) return false;
-
-    const userNorm = cleanPass.toLowerCase().replace(/[^a-z0-9]/g, '');
-
-    // If teacher/student has no password and no birthDate stored in database
-    if (!storedPass?.trim() && !storedBirthDate?.trim()) {
-      return true;
-    }
-
-    // 1. Check custom password match
-    if (storedPass?.trim()) {
-      const passClean = storedPass.trim();
-      const passNorm = passClean.toLowerCase().replace(/[^a-z0-9]/g, '');
-      if (cleanPass === passClean || userNorm === passNorm) {
-        return true;
-      }
-    }
-
-    // 2. Check direct birthDate string match
-    if (storedBirthDate?.trim()) {
-      const birthClean = storedBirthDate.trim();
-      const birthNorm = birthClean.toLowerCase().replace(/[^a-z0-9]/g, '');
-      if (cleanPass === birthClean || userNorm === birthNorm) {
-        return true;
-      }
-
-      // 3. Permutations & Format Equivalence (handles DDMMYYYY, YYYYMMDD, MMDDYYYY, YYYY-MM-DD, DD/MM/YYYY, etc.)
-      const extractDateCandidates = (rawStr: string): string[] => {
-        const candidates: string[] = [];
-        const trimmed = rawStr.trim();
-        if (!trimmed) return candidates;
-
-        const norm = trimmed.toLowerCase().replace(/[^a-z0-9]/g, '');
-        candidates.push(norm);
-
-        const nums = trimmed.split(/[^0-9]+/).filter(Boolean).map(Number);
-        const digitsOnly = trimmed.replace(/[^0-9]/g, '');
-
-        let day = 0, month = 0, year = 0;
-
-        if (nums.length === 3) {
-          if (nums[0] > 1000) {
-            year = nums[0];
-            if (nums[1] <= 12 && nums[2] <= 31) { month = nums[1]; day = nums[2]; }
-            else if (nums[2] <= 12 && nums[1] <= 31) { month = nums[2]; day = nums[1]; }
-          } else if (nums[2] > 0) {
-            year = nums[2] < 100 ? (nums[2] > 30 ? 1900 + nums[2] : 2000 + nums[2]) : nums[2];
-            if (nums[0] > 12) { day = nums[0]; month = nums[1]; }
-            else if (nums[1] > 12) { month = nums[0]; day = nums[1]; }
-            else { day = nums[0]; month = nums[1]; }
-          }
-        } else if (digitsOnly.length === 8) {
-          if (digitsOnly.startsWith('19') || digitsOnly.startsWith('20')) {
-            year = parseInt(digitsOnly.slice(0, 4), 10);
-            month = parseInt(digitsOnly.slice(4, 6), 10);
-            day = parseInt(digitsOnly.slice(6, 8), 10);
-          } else {
-            const y = parseInt(digitsOnly.slice(4, 8), 10);
-            const p1 = parseInt(digitsOnly.slice(0, 2), 10);
-            const p2 = parseInt(digitsOnly.slice(2, 4), 10);
-            year = y;
-            if (p1 > 12) { day = p1; month = p2; }
-            else if (p2 > 12) { month = p1; day = p2; }
-            else { day = p1; month = p2; }
-          }
-        } else if (digitsOnly.length === 6) {
-          const p1 = parseInt(digitsOnly.slice(0, 2), 10);
-          const p2 = parseInt(digitsOnly.slice(2, 4), 10);
-          const yShort = parseInt(digitsOnly.slice(4, 6), 10);
-          year = yShort > 30 ? 1900 + yShort : 2000 + yShort;
-          if (p1 > 12) { day = p1; month = p2; }
-          else if (p2 > 12) { month = p1; day = p2; }
-          else { day = p1; month = p2; }
-        }
-
-        if (day > 0 && month > 0 && year > 0) {
-          const dd = String(day).padStart(2, '0');
-          const mm = String(month).padStart(2, '0');
-          const yyyy = String(year);
-          const yy = yyyy.slice(-2);
-
-          candidates.push(`${dd}${mm}${yyyy}`);
-          candidates.push(`${mm}${dd}${yyyy}`);
-          candidates.push(`${yyyy}${mm}${dd}`);
-          candidates.push(`${dd}${mm}${yy}`);
-          candidates.push(`${mm}${dd}${yy}`);
-          candidates.push(`${dd}/${mm}/${yyyy}`);
-          candidates.push(`${mm}/${dd}/${yyyy}`);
-          candidates.push(`${yyyy}-${mm}-${dd}`);
-          candidates.push(`${dd}-${mm}-${yyyy}`);
-        }
-
-        return candidates;
-      };
-
-      const storedCandidates = extractDateCandidates(storedBirthDate);
-      const userCandidates = extractDateCandidates(cleanPass);
-
-      for (const u of userCandidates) {
-        if (storedCandidates.includes(u)) {
-          return true;
-        }
-      }
-    }
-
-    return false;
-  };
-
   const handleLoginSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
@@ -219,18 +109,24 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       return;
     }
 
-    // 1. Deteksi Akun Admin
+    // 1. Deteksi Akun Admin (fleksibel huruf besar/kecil)
     const storedAdmin = getStoredAdminAccount();
     const adminUserClean = storedAdmin.username.trim().toLowerCase();
     const adminPassClean = storedAdmin.password.trim();
+    const cleanUserNorm = cleanUsername.toLowerCase();
+
     const isUsernameAdmin =
-      cleanUsername.toLowerCase() === adminUserClean ||
-      cleanUsername.toLowerCase() === 'admin' ||
-      normalize(cleanUsername) === 'admin';
+      cleanUserNorm === adminUserClean ||
+      cleanUserNorm === 'admin' ||
+      cleanAlphanumeric(cleanUsername) === 'admin';
+
     const isPasswordAdmin =
       cleanPass === adminPassClean ||
       cleanPass.toLowerCase() === adminPassClean.toLowerCase() ||
-      (adminPassClean === 'admin' && (cleanPass === 'admin' || cleanPass === 'admin123' || cleanPass === 'administrator'));
+      (adminPassClean.toLowerCase() === 'admin' &&
+        (cleanPass.toLowerCase() === 'admin' ||
+          cleanPass.toLowerCase() === 'admin123' ||
+          cleanPass.toLowerCase() === 'administrator'));
 
     if (isUsernameAdmin && isPasswordAdmin) {
       const adminUser: AuthUser = {
@@ -247,79 +143,27 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       return;
     }
 
-    // 2. Deteksi Akun Guru
-    const teacherMatch = teachers.find((t) => {
-      const nameClean = t.name.trim().toLowerCase();
-      const userClean = cleanUsername.toLowerCase();
-      const normName = normalize(t.name);
-      const normUser = normalize(cleanUsername);
-      if (nameClean === userClean) return true;
-      if (t.username && t.username.trim().toLowerCase() === userClean) return true;
-      if (t.nip && t.nip.trim().toLowerCase() === userClean) return true;
-      if (t.nik && t.nik.trim().toLowerCase() === userClean) return true;
-      if (t.nuptk && t.nuptk.trim().toLowerCase() === userClean) return true;
-      if (normName === normUser) return true;
-      if (normName.length >= 3 && normUser.length >= 3 && (normName.startsWith(normUser) || normUser.startsWith(normName))) return true;
-      return false;
-    });
+    // 2. Deteksi Akun Guru dan Siswa secara fleksibel:
+    // - Huruf besar/kecil pada nama, username, NIP, NIS, NISN bebas terdeteksi
+    // - Password tanggal lahir fleksibel: tanggal/bulan/tahun maupun bulan/tanggal/tahun, dengan/tanpa pemisah
+    const authResult = authenticateUser(cleanUsername, cleanPass, teachers, students);
 
-    if (teacherMatch) {
-      const isPassValid = checkPasswordOrDateMatch(cleanPass, teacherMatch.password, teacherMatch.birthDate);
-      if (isPassValid) {
-        const teacherUser: AuthUser = {
-          role: 'guru',
-          name: teacherMatch.name,
-          username: teacherMatch.username || teacherMatch.name.toLowerCase().replace(/\s+/g, ''),
-          password: teacherMatch.password || teacherMatch.birthDate,
-          photoUrl: teacherMatch.photoUrl,
-          birthDate: teacherMatch.birthDate,
-          details: teacherMatch,
-        };
-        setSuccessMessage(`Selamat datang, ${teacherMatch.name}! (Terdeteksi sebagai Guru)`);
-        onLogin(teacherUser, rememberMe);
-        onClose();
-        return;
-      } else {
-        setErrorMessage(`Password atau tanggal lahir salah untuk Guru ${teacherMatch.name}.`);
-        return;
-      }
+    if (authResult.authenticatedUser) {
+      const user = authResult.authenticatedUser;
+      const roleLabel = user.role === 'guru' ? 'Guru' : 'Siswa';
+      setSuccessMessage(`Selamat datang, ${user.name}! (Terdeteksi sebagai ${roleLabel})`);
+      onLogin(user, rememberMe);
+      onClose();
+      return;
     }
 
-    // 3. Deteksi Akun Siswa
-    const studentMatch = students.find((s) => {
-      const nameClean = s.name.trim().toLowerCase();
-      const userClean = cleanUsername.toLowerCase();
-      const normName = normalize(s.name);
-      const normUser = normalize(cleanUsername);
-      if (nameClean === userClean) return true;
-      if (s.username && s.username.trim().toLowerCase() === userClean) return true;
-      if (s.nis && s.nis.trim().toLowerCase() === userClean) return true;
-      if (s.nisn && s.nisn.trim().toLowerCase() === userClean) return true;
-      if (normName === normUser) return true;
-      if (normName.length >= 3 && normUser.length >= 3 && (normName.startsWith(normUser) || normUser.startsWith(normName))) return true;
-      return false;
-    });
-
-    if (studentMatch) {
-      const isPassValid = checkPasswordOrDateMatch(cleanPass, studentMatch.password, studentMatch.birthDate);
-      if (isPassValid) {
-        const studentUser: AuthUser = {
-          role: 'siswa',
-          name: studentMatch.name,
-          username: studentMatch.username || studentMatch.name.toLowerCase().replace(/\s+/g, ''),
-          password: studentMatch.password || studentMatch.birthDate,
-          photoUrl: studentMatch.photoUrl,
-          birthDate: studentMatch.birthDate,
-          details: studentMatch,
-        };
-        setSuccessMessage(`Selamat datang, ${studentMatch.name}! (Terdeteksi sebagai Siswa)`);
-        onLogin(studentUser, rememberMe);
-        onClose();
-        return;
-      } else {
-        setErrorMessage(`Password atau tanggal lahir salah untuk Siswa ${studentMatch.name}.`);
-        return;
-      }
+    // Jika nama atau username cocok tetapi password/tanggal lahir belum tepat
+    if (authResult.hasNameMatch && authResult.matchedAccountName) {
+      const roleLabel = authResult.candidateRole === 'guru' ? 'Guru' : 'Siswa';
+      setErrorMessage(
+        `Password atau tanggal lahir salah untuk ${roleLabel} "${authResult.matchedAccountName}". Password dapat berupa kata sandi akun atau tanggal lahir (bebas format: tanggal/bulan/tahun atau bulan/tanggal/tahun).`
+      );
+      return;
     }
 
     // Jika username cocok admin tapi password salah
@@ -330,7 +174,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
 
     // Jika tidak ditemukan di database manapun
     setErrorMessage(
-      `Akun "${cleanUsername}" tidak ditemukan. Pastikan Username, Nama Lengkap, NIP, atau NISN sudah terdaftar di sistem.`
+      `Akun "${cleanUsername}" tidak ditemukan. Pastikan Nama Lengkap (huruf besar/kecil bebas), Username, NIP, atau NISN sudah terdaftar di sistem.`
     );
   };
 
@@ -421,16 +265,24 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   };
 
   // Filter accounts for the help drawer
+  const qClean = searchAccountQuery.trim().toLowerCase();
   const filteredTeachers = teachers.filter(
     (t) =>
-      t.name.toLowerCase().includes(searchAccountQuery.toLowerCase()) ||
-      t.subject.toLowerCase().includes(searchAccountQuery.toLowerCase())
+      !qClean ||
+      t.name.toLowerCase().includes(qClean) ||
+      t.subject.toLowerCase().includes(qClean) ||
+      (t.username && t.username.toLowerCase().includes(qClean)) ||
+      (t.nip && t.nip.includes(qClean))
   );
 
   const filteredStudents = students.filter(
     (s) =>
-      s.name.toLowerCase().includes(searchAccountQuery.toLowerCase()) ||
-      s.classRoom.toLowerCase().includes(searchAccountQuery.toLowerCase())
+      !qClean ||
+      s.name.toLowerCase().includes(qClean) ||
+      s.classRoom.toLowerCase().includes(qClean) ||
+      (s.username && s.username.toLowerCase().includes(qClean)) ||
+      (s.nisn && s.nisn.includes(qClean)) ||
+      (s.nis && s.nis.includes(qClean))
   );
 
   return (
@@ -725,7 +577,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                     <span>Username / Nama Lengkap</span>
                   </span>
                   <span className="text-[10px] text-amber-300 font-mono font-semibold bg-amber-400/10 px-2 py-0.5 rounded-md border border-amber-400/20">
-                    Admin / Guru / Siswa
+                    Huruf besar/kecil bebas
                   </span>
                 </label>
                 <div className="relative">
@@ -734,11 +586,14 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                     type="text"
                     value={usernameInput}
                     onChange={(e) => setUsernameInput(e.target.value)}
-                    placeholder="Masukkan username, nama lengkap, NIP, atau NISN"
+                    placeholder="Masukkan nama lengkap, username, NIP, atau NISN"
                     className="w-full pl-10 pr-4 py-3 bg-slate-900/90 border border-slate-700 text-slate-100 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-amber-400 transition-all font-semibold placeholder:text-slate-500"
                     required
                   />
                 </div>
+                <p className="text-[10px] text-slate-400 mt-1">
+                  💡 Awalan huruf besar maupun kecil tetap otomatis terdeteksi oleh sistem.
+                </p>
               </div>
 
               {/* Password Field */}
@@ -746,10 +601,10 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 <label className="block text-xs font-bold text-slate-200 mb-1.5 flex items-center justify-between">
                   <span className="flex items-center gap-1.5">
                     <KeyRound className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Password / Kata Sandi</span>
+                    <span>Password / Tanggal Lahir</span>
                   </span>
                   <span className="text-[10px] text-amber-300 font-mono font-semibold bg-amber-400/10 px-2 py-0.5 rounded-md border border-amber-400/20">
-                    Password / Tanggal Lahir (DDMMYYYY)
+                    tgl/bln/thn atau bln/tgl/thn
                   </span>
                 </label>
                 <div className="relative">
@@ -758,7 +613,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                     type={showPassword ? 'text' : 'password'}
                     value={passwordInput}
                     onChange={(e) => setPasswordInput(e.target.value)}
-                    placeholder="Masukkan password atau tanggal lahir (contoh: 25081995)"
+                    placeholder="Contoh: 15/08/2012 atau 08/15/2012 atau 15082012"
                     className="w-full pl-10 pr-10 py-3 bg-slate-900/90 border border-slate-700 text-slate-100 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-amber-400 transition-all font-semibold placeholder:text-slate-500"
                     required
                   />
@@ -770,6 +625,9 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                     {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
                 </div>
+                <p className="text-[10px] text-slate-400 mt-1">
+                  💡 Format tanggal fleksibel: mau <span className="text-amber-300 font-semibold">tanggal/bulan/tahun</span> (15/08/2012) atau <span className="text-amber-300 font-semibold">bulan/tanggal/tahun</span> (08/15/2012), dengan atau tanpa pemisah tetap terbaca oleh sistem.
+                </p>
               </div>
 
               {/* Remember Me / Ingat Saya Checkbox */}

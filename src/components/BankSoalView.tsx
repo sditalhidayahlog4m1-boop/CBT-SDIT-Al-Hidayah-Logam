@@ -6,8 +6,13 @@ import { exportBankToExcel } from '../utils/exportImport';
 import { ConfirmModal, ToastContainer, ToastMessage } from './NotificationModal';
 import { EditBankSoalModal } from './EditBankSoalModal';
 import { useHistoryModal } from '../utils/navigationHistory';
-import { getStoredSubjects, saveStoredBanks } from '../utils/storage';
-import { saveAppDataToFirestore } from '../utils/firebaseSync';
+import { getStoredSubjects, saveStoredSubjects, saveStoredBanks } from '../utils/storage';
+import {
+  saveAppDataToFirestore,
+  deleteBankSoalPermanently,
+  recordDeletedBankId,
+  isBankDeletedLocally,
+} from '../utils/firebaseSync';
 import { broadcastAppDataChange } from '../utils/syncEngine';
 import {
   findMatchingSubject,
@@ -74,6 +79,8 @@ export const BankSoalView: React.FC<BankSoalViewProps> = ({ banks, setBanks, set
   );
 
   const filtered = banks.filter((b) => {
+    if (!b || !b.id || isBankDeletedLocally(b.id)) return false;
+
     const matchesSearch =
       b.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
       b.subject.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -180,19 +187,19 @@ export const BankSoalView: React.FC<BankSoalViewProps> = ({ banks, setBanks, set
     setDeleteConfirmTarget(bank);
   };
 
-  const executeDelete = () => {
+  const executeDelete = async () => {
     if (!deleteConfirmTarget) return;
     const targetTitle = deleteConfirmTarget.title;
     const targetId = deleteConfirmTarget.id;
-    const updated = banks.filter((b) => b.id !== targetId);
+    recordDeletedBankId(targetId);
+
+    const updated = await deleteBankSoalPermanently(targetId, banks);
     setBanks(updated);
-    saveStoredBanks(updated);
     broadcastAppDataChange({ banks: updated });
-    saveAppDataToFirestore({ banks: updated });
 
     if (previewBank?.id === targetId) setPreviewBank(null);
     setDeleteConfirmTarget(null);
-    addToast('success', `Paket soal "${targetTitle}" berhasil dihapus dari Bank Soal.`, 'Berhasil Dihapus');
+    addToast('success', `Paket soal "${targetTitle}" berhasil dihapus permanen dari Bank Soal.`, 'Berhasil Dihapus');
   };
 
   return (

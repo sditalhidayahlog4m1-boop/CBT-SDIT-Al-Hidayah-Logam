@@ -132,7 +132,30 @@ export function getStoredBanks(): QuestionBank[] {
   try {
     const data = localStorage.getItem('cbt_banks');
     if (!data) return [];
-    return JSON.parse(data) || [];
+    const parsed: QuestionBank[] = JSON.parse(data) || [];
+    if (!Array.isArray(parsed)) return [];
+
+    let deletedIds: string[] = ['bank-ext-1787720366170', 'bank-ext-1787717409106'];
+    try {
+      const storedDeleted = JSON.parse(localStorage.getItem('cbt_deleted_bank_ids') || '[]');
+      if (Array.isArray(storedDeleted)) {
+        deletedIds = Array.from(new Set([...deletedIds, ...storedDeleted]));
+      }
+    } catch {}
+
+    const clean = parsed.filter(
+      (b) =>
+        b &&
+        b.id &&
+        !deletedIds.includes(b.id) &&
+        b.teacher_name !== 'Guru Pengampu' &&
+        !(b.teacher_name === 'Andi' && b.title === 'Tahsin')
+    );
+
+    if (clean.length !== parsed.length) {
+      localStorage.setItem('cbt_banks', JSON.stringify(clean));
+    }
+    return clean;
   } catch {
     return [];
   }
