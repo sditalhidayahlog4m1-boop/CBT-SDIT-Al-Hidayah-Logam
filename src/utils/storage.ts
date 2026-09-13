@@ -453,3 +453,20 @@ export function shuffleGameDataMap(map: Record<string, any[]>): Record<string, a
   return newMap;
 }
 
+export function getStoredLastBackupTime(): string | null {
+  try {
+    return localStorage.getItem('cbt_last_backup_time');
+  } catch {
+    return null;
+  }
+}
+
+export function saveStoredLastBackupTime(timeIso: string): void {
+  try {
+    localStorage.setItem('cbt_last_backup_time', timeIso);
+  } catch {
+    // ignore
+  }
+}
+
+

@@ -27,6 +27,7 @@ import {
   Globe,
   User,
   Award,
+  HardDriveDownload,
 } from 'lucide-react';
 import { ActiveTab, AuthUser, RolePermissions } from '../types';
 
@@ -169,6 +170,13 @@ const MENU_LIST: MenuDefinition[] = [
     category: 'Pelaksanaan Ujian',
     description: 'Rekapitulasi nilai, statistik kelulusan, dan cetak hasil ujian',
     icon: History,
+  },
+  {
+    id: 'backup-data',
+    label: 'Backup & Upload Data Sistem',
+    category: 'Pengaturan System',
+    description: 'Pencadangan seluruh data menu ke file arsip dan pemulihan (upload) data sistem',
+    icon: HardDriveDownload,
   },
   {
     id: 'reset-data',

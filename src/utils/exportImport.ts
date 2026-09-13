@@ -1,6 +1,6 @@
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
-import { QuestionBank, QuestionOption, Teacher, Student, ExamResult, DailyGradeRecord } from '../types';
+import { QuestionBank, QuestionOption, Teacher, Student, Subject, ExamResult, DailyGradeRecord, FullBackupData } from '../types';
 import { getGradePredicate, GRADE_SCALE_TABLE } from './gradeHelper';
 
 // Download Excel Template for Upload Soal
@@ -656,4 +656,242 @@ export function exportNilaiHarianToPdf(
 
   doc.save(`Rekap_Nilai_Harian_${subjectName}_${classRoom}.pdf`);
 }
+
+/**
+ * Unduh Cadangan Lengkap Sistem format JSON
+ */
+export function downloadFullSystemBackupJson(backup: FullBackupData, customFileName?: string) {
+  const jsonStr = JSON.stringify(backup, null, 2);
+  const blob = new Blob([jsonStr], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const dateStamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+  const safeSchool = (backup.schoolName || 'SDIT_AlHidayah').replace(/[^a-zA-Z0-9]/g, '_');
+  const filename = customFileName || `Backup_CBT_${safeSchool}_${dateStamp}.json`;
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * Unduh Rekap Arsip Seluruh Data Menu format Multi-Sheet Excel (.xlsx)
+ */
+export function downloadFullSystemBackupExcel(backup: FullBackupData) {
+  const wb = XLSX.utils.book_new();
+
+  // 1. Sheet Ringkasan
+  const totalQuestions = (backup.banks || []).reduce((acc, b) => acc + (b.questions?.length || 0), 0);
+  const summaryRows = [
+    { 'PARAMETER SISTEM': 'Nama Aplikasi', 'KETERANGAN / NILAI': backup.appName || 'CBT SDIT Al Hidayah Logam' },
+    { 'PARAMETER SISTEM': 'Nama Lembaga / Sekolah', 'KETERANGAN / NILAI': backup.schoolName || 'SDIT Al Hidayah Logam' },
+    { 'PARAMETER SISTEM': 'Waktu Pencadangan', 'KETERANGAN / NILAI': new Date(backup.exportedAt).toLocaleString('id-ID') },
+    { 'PARAMETER SISTEM': 'Versi Backup', 'KETERANGAN / NILAI': backup.version || '1.0.0' },
+    { 'PARAMETER SISTEM': 'Total Data Guru', 'KETERANGAN / NILAI': (backup.teachers || []).length },
+    { 'PARAMETER SISTEM': 'Total Data Siswa', 'KETERANGAN / NILAI': (backup.students || []).length },
+    { 'PARAMETER SISTEM': 'Total Mata Pelajaran', 'KETERANGAN / NILAI': (backup.subjects || []).length },
+    { 'PARAMETER SISTEM': 'Total Paket Bank Soal', 'KETERANGAN / NILAI': (backup.banks || []).length },
+    { 'PARAMETER SISTEM': 'Total Butir Soal Keseluruhan', 'KETERANGAN / NILAI': totalQuestions },
+    { 'PARAMETER SISTEM': 'Total Riwayat Ujian Siswa', 'KETERANGAN / NILAI': (backup.results || []).length },
+    { 'PARAMETER SISTEM': 'Total Catatan Nilai Harian', 'KETERANGAN / NILAI': (backup.dailyGrades || []).length },
+    { 'PARAMETER SISTEM': 'Total Riwayat Game Edukasi', 'KETERANGAN / NILAI': (backup.gameLogs || []).length },
+  ];
+  const wsSummary = XLSX.utils.json_to_sheet(summaryRows);
+  wsSummary['!cols'] = [{ wch: 30 }, { wch: 45 }];
+  XLSX.utils.book_append_sheet(wb, wsSummary, 'Ringkasan Sistem');
+
+  // 2. Sheet Data Guru
+  const guruRows = (backup.teachers || []).map((g, idx) => ({
+    'NO': idx + 1,
+    'NAMA GURU': g.name,
+    'JENIS KELAMIN': g.gender || '-',
+    'NO NIK': g.nik || '-',
+    'NUPTK': g.nuptk || '-',
+    'JABATAN': g.position || '-',
+    'MAPEL DIAMPU': g.subject || '-',
+    'TEMPAT LAHIR': g.birthPlace || '-',
+    'TANGGAL LAHIR': g.birthDate || '-',
+    'NO HP / WA': g.phone || '-',
+    'STATUS': g.activeStatus || 'Aktif',
+    'ALAMAT': g.address || '-',
+  }));
+  const wsGuru = XLSX.utils.json_to_sheet(guruRows);
+  XLSX.utils.book_append_sheet(wb, wsGuru, 'Data Guru');
+
+  // 3. Sheet Data Siswa
+  const siswaRows = (backup.students || []).map((s, idx) => ({
+    'NO': idx + 1,
+    'NIS': s.nis,
+    'NISN': s.nisn,
+    'NAMA LENGKAP': s.name,
+    'JENIS KELAMIN': s.gender || '-',
+    'KELAS': s.classRoom || '-',
+    'TEMPAT LAHIR': s.birthPlace || '-',
+    'TANGGAL LAHIR': s.birthDate || '-',
+    'NAMA AYAH': s.fatherName || '-',
+    'NAMA IBU': s.motherName || '-',
+    'NO HP AYAH': s.fatherPhone || '-',
+    'NO HP IBU': s.motherPhone || '-',
+    'TAHUN AJARAN': s.academicYear || '-',
+    'STATUS': s.activeStatus || 'Aktif',
+    'ALAMAT': s.address || '-',
+  }));
+  const wsSiswa = XLSX.utils.json_to_sheet(siswaRows);
+  XLSX.utils.book_append_sheet(wb, wsSiswa, 'Data Siswa');
+
+  // 4. Sheet Mata Pelajaran
+  const mapelRows = (backup.subjects || []).map((m, idx) => ({
+    'NO': idx + 1,
+    'KODE MAPEL': m.code,
+    'NAMA MATA PELAJARAN': m.name,
+    'KELAS / TINGKAT': m.gradeLevel || '-',
+  }));
+  const wsMapel = XLSX.utils.json_to_sheet(mapelRows);
+  XLSX.utils.book_append_sheet(wb, wsMapel, 'Mata Pelajaran');
+
+  // 5. Sheet Bank Soal
+  const bankRows = (backup.banks || []).map((b, idx) => ({
+    'NO': idx + 1,
+    'JUDUL PAKET SOAL': b.title,
+    'MATA PELAJARAN': b.subject,
+    'JENJANG / KELAS': b.grade_level || '-',
+    'ROMBEL': b.class_room || '-',
+    'GURU PENGAMPU': b.teacher_name || '-',
+    'TOKEN UJIAN': b.token,
+    'DURASI (MENIT)': b.durationMinutes || 60,
+    'JUMLAH BUTIR SOAL': b.total_questions || b.questions?.length || 0,
+    'STATUS PUBLIKASI': 'Tersedia',
+  }));
+  const wsBank = XLSX.utils.json_to_sheet(bankRows);
+  XLSX.utils.book_append_sheet(wb, wsBank, 'Bank Soal');
+
+  // 6. Sheet Nilai Harian
+  const harianRows = (backup.dailyGrades || []).map((d, idx) => {
+    const pred = getGradePredicate(d.score);
+    return {
+      'NO': idx + 1,
+      'NIS': d.nis || '-',
+      'NAMA SISWA': d.studentName,
+      'KELAS': d.classRoom,
+      'MATA PELAJARAN': d.subjectName,
+      'TANGGAL': d.date,
+      'MATERI / TUGAS': d.taskTitle,
+      'NILAI': d.score,
+      'PREDIKAT': pred.fullPredicate,
+      'KETERANGAN': pred.description,
+      'CATATAN': d.notes || '-',
+    };
+  });
+  const wsHarian = XLSX.utils.json_to_sheet(harianRows);
+  XLSX.utils.book_append_sheet(wb, wsHarian, 'Nilai Harian');
+
+  // 7. Sheet Hasil Ujian
+  const hasilRows = (backup.results || []).map((r, idx) => ({
+    'NO': idx + 1,
+    'NAMA SISWA': r.studentName,
+    'KELAS': r.classRoom,
+    'MATA PELAJARAN': r.subject,
+    'TOKEN UJIAN': r.token,
+    'NILAI AKHIR': r.score,
+    'JAWABAN BENAR': r.correctCount,
+    'JAWABAN SALAH': r.wrongCount,
+    'TOTAL SOAL': r.totalQuestions,
+    'STATUS KELULUSAN': r.passed ? 'LULUS' : 'TIDAK LULUS',
+    'WAKTU SELESAI': r.date,
+    'LAMA PENGERJAAN': r.durationSpent || '-',
+  }));
+  const wsHasil = XLSX.utils.json_to_sheet(hasilRows);
+  XLSX.utils.book_append_sheet(wb, wsHasil, 'Hasil Ujian');
+
+  // 8. Sheet Profil Sekolah
+  if (backup.schoolProfile) {
+    const sp = backup.schoolProfile;
+    const profRows = [
+      { 'INFORMASI': 'Nama Lembaga', 'NILAI': sp.name },
+      { 'INFORMASI': 'NPSN', 'NILAI': sp.npsn },
+      { 'INFORMASI': 'NSS', 'NILAI': sp.nss },
+      { 'INFORMASI': 'Akreditasi', 'NILAI': sp.accreditation },
+      { 'INFORMASI': 'Kepala Sekolah', 'NILAI': sp.headmaster },
+      { 'INFORMASI': 'Alamat', 'NILAI': sp.address },
+      { 'INFORMASI': 'Kota / Kabupaten', 'NILAI': sp.city },
+      { 'INFORMASI': 'Provinsi', 'NILAI': sp.province },
+      { 'INFORMASI': 'Telepon', 'NILAI': sp.phone },
+      { 'INFORMASI': 'Email', 'NILAI': sp.email },
+      { 'INFORMASI': 'Website', 'NILAI': sp.website },
+      { 'INFORMASI': 'Visi', 'NILAI': sp.vision },
+    ];
+    const wsProf = XLSX.utils.json_to_sheet(profRows);
+    XLSX.utils.book_append_sheet(wb, wsProf, 'Profil Sekolah');
+  }
+
+  const dateStamp = new Date().toISOString().slice(0, 10);
+  const fileName = `Rekap_Arsip_Semua_Data_${dateStamp}.xlsx`;
+  XLSX.writeFile(wb, fileName);
+}
+
+/**
+ * Parse dan validasi file cadangan JSON yang diupload
+ */
+export async function parseFullBackupJson(file: File): Promise<FullBackupData> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const text = e.target?.result as string;
+        if (!text || text.trim().length === 0) {
+          throw new Error('File cadangan yang diunggah kosong (0 byte).');
+        }
+
+        const raw = JSON.parse(text);
+
+        // Support both direct root object and nested { data: { ... } } structure
+        const payload: any = raw.data && typeof raw.data === 'object' && !Array.isArray(raw.data) ? raw.data : raw;
+
+        const teachers = Array.isArray(payload.teachers) ? payload.teachers : [];
+        const students = Array.isArray(payload.students) ? payload.students : [];
+        const subjects = Array.isArray(payload.subjects) ? payload.subjects : [];
+        const banks = Array.isArray(payload.banks) ? payload.banks : [];
+        const results = Array.isArray(payload.results) ? payload.results : [];
+        const dailyGrades = Array.isArray(payload.dailyGrades) ? payload.dailyGrades : [];
+        const gameLogs = Array.isArray(payload.gameLogs) ? payload.gameLogs : [];
+
+        if (
+          !Array.isArray(payload.teachers) &&
+          !Array.isArray(payload.students) &&
+          !Array.isArray(payload.banks) &&
+          !Array.isArray(payload.subjects)
+        ) {
+          throw new Error('Format file JSON tidak valid. Struktur arsip cadangan CBT tidak ditemukan.');
+        }
+
+        const validBackup: FullBackupData = {
+          version: raw.version || '1.0.0',
+          appName: raw.appName || 'CBT SDIT Al Hidayah Logam',
+          exportedAt: raw.exportedAt || raw.backupDate || new Date().toISOString(),
+          schoolName: raw.schoolName || payload.schoolProfile?.name || 'SDIT Al Hidayah Logam',
+          systemDescription: raw.systemDescription || 'Cadangan Sistem CBT',
+          teachers,
+          students,
+          subjects,
+          banks,
+          results,
+          dailyGrades,
+          gameLogs,
+          gameData: payload.gameData || {},
+          schoolProfile: payload.schoolProfile,
+          rolePermissions: payload.rolePermissions,
+        };
+
+        resolve(validBackup);
+      } catch (err: any) {
+        reject(new Error(err?.message || 'Gagal memproses file JSON cadangan. Pastikan file berformat JSON yang valid.'));
+      }
+    };
+    reader.onerror = (err) => reject(err);
+    reader.readAsText(file);
+  });
+}
+
 

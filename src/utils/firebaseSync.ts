@@ -884,3 +884,95 @@ export async function resetAllDataInFirestore(): Promise<boolean> {
   }
 }
 
+/**
+ * Unmark bank IDs so restored banks are not suppressed by deletion guard
+ */
+export function clearLocallyDeletedBankIds(bankIds: string[]) {
+  if (!Array.isArray(bankIds)) return;
+  bankIds.forEach((id) => locallyDeletedBankIds.delete(id));
+  try {
+    const arr = Array.from(locallyDeletedBankIds);
+    localStorage.setItem('cbt_deleted_bank_ids', JSON.stringify(arr));
+  } catch {}
+}
+
+/**
+ * Pulihkan seluruh data aplikasi ke Firestore (Master Document + Subcollections)
+ */
+export async function restoreAllDataInFirestore(
+  backup: {
+    teachers?: Teacher[];
+    students?: Student[];
+    subjects?: Subject[];
+    banks?: QuestionBank[];
+    results?: ExamResult[];
+    dailyGrades?: DailyGradeRecord[];
+    gameLogs?: GameHistoryLog[];
+    gameData?: Record<string, any>;
+    schoolProfile?: SchoolProfile;
+    rolePermissions?: RolePermissions;
+  },
+  mode: 'replace' | 'merge' = 'replace'
+): Promise<boolean> {
+  const db = getFirestoreDb();
+  if (!db) return false;
+
+  try {
+    const mainDocRef = doc(db, MAIN_COLLECTION, MAIN_DOCUMENT);
+
+    // If restore contains bank IDs, clear them from deletion filter
+    if (backup.banks && backup.banks.length > 0) {
+      clearLocallyDeletedBankIds(backup.banks.map((b) => b.id));
+    }
+
+    const payloadToSave: any = {
+      teachers: backup.teachers || [],
+      students: backup.students || [],
+      subjects: backup.subjects || [],
+      banks: backup.banks || [],
+      dailyGrades: backup.dailyGrades || [],
+      gameData: backup.gameData || {},
+      updatedAt: new Date().toISOString(),
+    };
+
+    if (backup.schoolProfile) payloadToSave.schoolProfile = backup.schoolProfile;
+    if (backup.rolePermissions) payloadToSave.rolePermissions = backup.rolePermissions;
+
+    if (mode === 'replace') {
+      await setDoc(mainDocRef, payloadToSave, { merge: false });
+      // Clear previous subcollections if replace mode
+      await Promise.all([
+        clearFirestoreCollection(db, EXAM_RESULTS_COLLECTION),
+        clearFirestoreCollection(db, GAME_LOGS_COLLECTION),
+      ]);
+    } else {
+      await setDoc(mainDocRef, payloadToSave, { merge: true });
+    }
+
+    // Write results to EXAM_RESULTS_COLLECTION
+    if (backup.results && backup.results.length > 0) {
+      const promises = backup.results.map((res) => {
+        if (!res.id) return Promise.resolve();
+        return setDoc(doc(db, EXAM_RESULTS_COLLECTION, res.id), res, { merge: true });
+      });
+      await Promise.all(promises);
+    }
+
+    // Write gameLogs to GAME_LOGS_COLLECTION
+    if (backup.gameLogs && backup.gameLogs.length > 0) {
+      const promises = backup.gameLogs.map((log) => {
+        if (!log.id) return Promise.resolve();
+        return setDoc(doc(db, GAME_LOGS_COLLECTION, log.id), log, { merge: true });
+      });
+      await Promise.all(promises);
+    }
+
+    console.log('[Firestore] Berhasil memulihkan dan memperbarui seluruh data sistem di Firestore.');
+    return true;
+  } catch (err: any) {
+    console.warn('[Firestore] Error restoring app data in Firestore:', err?.message || err);
+    return false;
+  }
+}
+
+

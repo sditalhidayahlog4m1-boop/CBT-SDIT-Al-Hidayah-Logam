@@ -11,6 +11,7 @@ import {
   AuthUser,
   RolePermissions,
   DailyGradeRecord,
+  FullBackupData,
 } from './types';
 import {
   getStoredTeachers,
@@ -64,12 +65,15 @@ import { ExamScreen } from './components/ExamScreen';
 import { ExamHistoryView } from './components/ExamHistoryView';
 import { GameHistoryView } from './components/GameHistoryView';
 import { HakAksesView } from './components/HakAksesView';
+import { BackupUploadDataView } from './components/BackupUploadDataView';
 import { ResetDataView } from './components/ResetDataView';
 
 import {
   fetchAppDataFromFirestore,
   saveAppDataToFirestore,
   resetAllDataInFirestore,
+  restoreAllDataInFirestore,
+  clearLocallyDeletedBankIds,
   subscribeToAppData,
   trackUserLoginInFirestore,
   syncExamResultToFirestore,
@@ -1009,6 +1013,140 @@ export default function App() {
     broadcastAppDataChange({ schoolProfile: updated });
   };
 
+  // Handler for Restoring & Uploading Full System Backup Data
+  const handleRestoreFullBackup = async (backup: FullBackupData, mode: 'replace' | 'merge') => {
+    let nextTeachers: Teacher[];
+    let nextStudents: Student[];
+    let nextSubjects: Subject[];
+    let nextBanks: QuestionBank[];
+    let nextResults: ExamResult[];
+    let nextDailyGrades: DailyGradeRecord[];
+    let nextGameLogs: GameHistoryLog[];
+    let nextGameData: Record<string, any>;
+    let nextSchoolProfile: SchoolProfile;
+    let nextRolePermissions: RolePermissions;
+
+    if (mode === 'replace') {
+      nextTeachers = backup.teachers || [];
+      nextStudents = backup.students || [];
+      nextSubjects = backup.subjects || [];
+      nextBanks = backup.banks || [];
+      nextResults = backup.results || [];
+      nextDailyGrades = backup.dailyGrades || [];
+      nextGameLogs = backup.gameLogs || [];
+      nextGameData = backup.gameData || {};
+      nextSchoolProfile = backup.schoolProfile || schoolProfile;
+      nextRolePermissions = backup.rolePermissions || rolePermissions;
+    } else {
+      // Merge mode: combine by IDs without duplicates
+      const teacherIds = new Set(teachers.map((t) => t.id));
+      nextTeachers = [...teachers, ...(backup.teachers || []).filter((t) => !teacherIds.has(t.id))];
+
+      const studentIds = new Set(students.map((s) => s.id));
+      nextStudents = [...students, ...(backup.students || []).filter((s) => !studentIds.has(s.id))];
+
+      const subjectIds = new Set(subjects.map((sub) => sub.id));
+      nextSubjects = [...subjects, ...(backup.subjects || []).filter((sub) => !subjectIds.has(sub.id))];
+
+      const bankIds = new Set(banks.map((b) => b.id));
+      nextBanks = [...banks, ...(backup.banks || []).filter((b) => !bankIds.has(b.id))];
+
+      const resultIds = new Set(results.map((r) => r.id));
+      nextResults = [...results, ...(backup.results || []).filter((r) => !resultIds.has(r.id))];
+
+      const gradeIds = new Set(dailyGrades.map((g) => g.id));
+      nextDailyGrades = [...dailyGrades, ...(backup.dailyGrades || []).filter((g) => !gradeIds.has(g.id))];
+
+      const gameLogIds = new Set(gameLogs.map((l) => l.id));
+      nextGameLogs = [...gameLogs, ...(backup.gameLogs || []).filter((l) => !gameLogIds.has(l.id))];
+
+      nextGameData = { ...gameData, ...(backup.gameData || {}) };
+      nextSchoolProfile = backup.schoolProfile || schoolProfile;
+      nextRolePermissions = backup.rolePermissions || rolePermissions;
+    }
+
+    // If there were any restored banks, clear their IDs from deletion guard
+    if (nextBanks.length > 0) {
+      clearLocallyDeletedBankIds(nextBanks.map((b) => b.id));
+    }
+
+    // 1. Update React States
+    setTeachers(nextTeachers);
+    setStudents(nextStudents);
+    setSubjects(nextSubjects);
+    setBanks(nextBanks);
+    setResults(nextResults);
+    setDailyGrades(nextDailyGrades);
+    setGameLogs(nextGameLogs);
+    setGameData(nextGameData);
+    if (backup.schoolProfile) {
+      setSchoolProfile(nextSchoolProfile);
+      syncWebFaviconAndLogo(nextSchoolProfile.logoUrl, nextSchoolProfile.name);
+    }
+    if (backup.rolePermissions) setRolePermissions(nextRolePermissions);
+
+    // 2. Persist to localStorage
+    saveStoredTeachers(nextTeachers);
+    saveStoredStudents(nextStudents);
+    saveStoredSubjects(nextSubjects);
+    saveStoredBanks(nextBanks);
+    saveStoredResults(nextResults);
+    saveStoredDailyGrades(nextDailyGrades);
+    saveStoredGameLogs(nextGameLogs);
+    saveStoredGameData(nextGameData);
+    if (backup.schoolProfile) saveStoredSchoolProfile(nextSchoolProfile);
+    if (backup.rolePermissions) saveStoredRolePermissions(nextRolePermissions);
+
+    // 3. Update sync tracking ref
+    if (lastSyncedDataRef.current) {
+      lastSyncedDataRef.current = {
+        ...lastSyncedDataRef.current,
+        teachers: nextTeachers,
+        students: nextStudents,
+        subjects: nextSubjects,
+        banks: nextBanks,
+        results: nextResults,
+        dailyGrades: nextDailyGrades,
+        gameLogs: nextGameLogs,
+        gameData: nextGameData,
+        schoolProfile: nextSchoolProfile,
+        rolePermissions: nextRolePermissions,
+        updatedAt: new Date().toISOString(),
+      };
+    }
+
+    // 4. Broadcast to other tabs & windows
+    broadcastAppDataChange({
+      teachers: nextTeachers,
+      students: nextStudents,
+      subjects: nextSubjects,
+      banks: nextBanks,
+      results: nextResults,
+      dailyGrades: nextDailyGrades,
+      gameLogs: nextGameLogs,
+      gameData: nextGameData,
+      schoolProfile: nextSchoolProfile,
+      rolePermissions: nextRolePermissions,
+    });
+
+    // 5. Restore into Firebase Cloud Firestore
+    await restoreAllDataInFirestore(
+      {
+        teachers: nextTeachers,
+        students: nextStudents,
+        subjects: nextSubjects,
+        banks: nextBanks,
+        results: nextResults,
+        dailyGrades: nextDailyGrades,
+        gameLogs: nextGameLogs,
+        gameData: nextGameData,
+        schoolProfile: nextSchoolProfile,
+        rolePermissions: nextRolePermissions,
+      },
+      mode
+    );
+  };
+
   const handleResetAllData = async () => {
     clearAllStoredData();
     setTeachers([]);
@@ -1219,6 +1357,23 @@ export default function App() {
               setRolePermissions={setRolePermissions}
               currentUser={currentUser}
               onOpenLoginModal={handleOpenLoginModal}
+            />
+          )}
+
+          {activeTab === 'backup-data' && (
+            <BackupUploadDataView
+              teachers={teachers}
+              students={students}
+              subjects={subjects}
+              banks={banks}
+              results={results}
+              dailyGrades={dailyGrades}
+              gameLogs={gameLogs}
+              gameData={gameData}
+              schoolProfile={schoolProfile}
+              rolePermissions={rolePermissions}
+              onRestoreData={handleRestoreFullBackup}
+              setActiveTab={handleNavigateTab}
             />
           )}
 

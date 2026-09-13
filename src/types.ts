@@ -172,7 +172,49 @@ export type ActiveTab =
   | 'mulai-ujian'
   | 'riwayat-ujian'
   | 'hak-akses'
+  | 'backup-data'
   | 'reset-data';
+
+export interface SchoolProfile {
+  name: string;
+  logoUrl?: string;
+  npsn: string;
+  nss: string;
+  accreditation: string;
+  educationalLevel: string;
+  schoolStatus: string;
+  headmaster: string;
+  address: string;
+  village: string;
+  district: string;
+  city: string;
+  province: string;
+  postalCode: string;
+  phone: string;
+  email: string;
+  website: string;
+  establishmentYear: string;
+  vision: string;
+  mission: string[];
+}
+
+export interface FullBackupData {
+  version: string;
+  appName: string;
+  exportedAt: string;
+  schoolName: string;
+  systemDescription?: string;
+  teachers: Teacher[];
+  students: Student[];
+  subjects: Subject[];
+  banks: QuestionBank[];
+  results: ExamResult[];
+  dailyGrades?: DailyGradeRecord[];
+  gameLogs?: GameHistoryLog[];
+  gameData?: Record<string, any>;
+  schoolProfile?: SchoolProfile;
+  rolePermissions?: RolePermissions;
+}
 
 export interface RolePermissions {
   guru: ActiveTab[];

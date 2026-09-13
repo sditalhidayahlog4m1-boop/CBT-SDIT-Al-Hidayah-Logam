@@ -83,6 +83,10 @@ const TAB_TITLES: Record<ActiveTab, { title: string; subtitle: string }> = {
     title: 'Manajemen Hak Akses Menu',
     subtitle: 'Atur dan batasi hak akses menu yang boleh dilihat dan diakses oleh Guru dan Siswa',
   },
+  'backup-data': {
+    title: 'Backup & Upload Data',
+    subtitle: 'Cadangkan seluruh data menu sistem ke file arsip, unduh kapan saja, dan perbarui data setelah file diupload',
+  },
   'reset-data': {
     title: 'Reset Semua Data System',
     subtitle: 'Hapus dan kosongkan seluruh data guru, siswa bawaan, soal, dan riwayat ujian',

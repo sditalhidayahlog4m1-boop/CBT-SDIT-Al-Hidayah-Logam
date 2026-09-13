@@ -23,6 +23,7 @@ import {
   User,
   Trophy,
   Award,
+  HardDriveDownload,
 } from 'lucide-react';
 import { ActiveTab, AuthUser, RolePermissions } from '../types';
 import { SchoolProfile } from '../utils/storage';
@@ -71,6 +72,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'mulai-ujian', label: 'Mulai Ujian', icon: PlayCircle, student: true },
     { id: 'riwayat-ujian', label: 'Riwayat Ujian', icon: History },
     { id: 'hak-akses', label: 'Menu Akses', icon: ShieldCheck, isHakAkses: true },
+    { id: 'backup-data', label: 'Backup & Upload Data', icon: HardDriveDownload, isBackup: true },
     { id: 'reset-data', label: 'Reset Data', icon: RotateCcw, isReset: true },
   ];
 
@@ -186,6 +188,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     ? 'text-emerald-400 hover:bg-slate-800/80 hover:text-emerald-300'
                     : (item as any).isHakAkses
                     ? 'text-amber-300 hover:bg-amber-500/10 hover:text-amber-200 border border-amber-500/30'
+                    : (item as any).isBackup
+                    ? 'text-sky-300 hover:bg-sky-500/10 hover:text-sky-200 border border-sky-500/20'
                     : (item as any).isReset
                     ? 'text-rose-400 hover:bg-rose-500/10 hover:text-rose-300'
                     : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
