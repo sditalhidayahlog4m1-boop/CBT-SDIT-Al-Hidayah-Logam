@@ -1,25 +1,37 @@
-import React, { useState } from 'react';
-import { Database, Search, Eye, Edit2, Edit3, Trash2, Key, Download, BookOpen, Layers, Plus, FileEdit, Copy, Check } from 'lucide-react';
-import { QuestionBank, ActiveTab } from '../types';
+import React, { useState, useMemo } from 'react';
+import { Database, Search, Eye, Edit2, Edit3, Trash2, Key, Download, BookOpen, Layers, Plus, FileEdit, Copy, Check, Sparkles, RefreshCw } from 'lucide-react';
+import { QuestionBank, ActiveTab, Subject } from '../types';
 import { normalizeQuestion } from '../utils/normalizeQuestion';
 import { exportBankToExcel } from '../utils/exportImport';
 import { ConfirmModal, ToastContainer, ToastMessage } from './NotificationModal';
 import { EditBankSoalModal } from './EditBankSoalModal';
 import { useHistoryModal } from '../utils/navigationHistory';
+import { getStoredSubjects, saveStoredBanks } from '../utils/storage';
+import { saveAppDataToFirestore } from '../utils/firebaseSync';
+import { broadcastAppDataChange } from '../utils/syncEngine';
+import {
+  findMatchingSubject,
+  autoSyncBanksWithSubjects,
+  isSubjectExactMatch,
+} from '../utils/subjectMatcher';
 
 interface BankSoalViewProps {
   banks: QuestionBank[];
   setBanks: React.Dispatch<React.SetStateAction<QuestionBank[]>>;
   setActiveTab: (tab: ActiveTab) => void;
+  subjects?: Subject[];
 }
 
-export const BankSoalView: React.FC<BankSoalViewProps> = ({ banks, setBanks, setActiveTab }) => {
+export const BankSoalView: React.FC<BankSoalViewProps> = ({ banks, setBanks, setActiveTab, subjects }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedSubjectFilter, setSelectedSubjectFilter] = useState('ALL');
   const [previewBank, setPreviewBank] = useState<QuestionBank | null>(null);
   const [editingBank, setEditingBank] = useState<QuestionBank | null>(null);
   const [editingQuestionIndex, setEditingQuestionIndex] = useState<number>(0);
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
+
+  // Synchronize with master subjects from Menu Mata Pelajaran
+  const registeredSubjects = (subjects && subjects.length > 0) ? subjects : getStoredSubjects();
 
   // Synchronize Preview Modal with browser history
   useHistoryModal({
@@ -37,8 +49,29 @@ export const BankSoalView: React.FC<BankSoalViewProps> = ({ banks, setBanks, set
     tab: 'bank-soal',
   });
 
-  // Collect unique subjects
-  const uniqueSubjects = Array.from(new Set(banks.map((b) => b.subject)));
+  // Helper to match a bank's subject or title with the master subjects from Menu Mata Pelajaran
+  const findRegisteredSubjectMatch = (bank: QuestionBank): Subject | null => {
+    return findMatchingSubject(bank, registeredSubjects);
+  };
+
+  // Check if any banks can be synchronized with master subjects
+  const banksNeedingSync = useMemo(() => {
+    if (!registeredSubjects || registeredSubjects.length === 0) return [];
+    return banks.filter((b) => {
+      const isExact = isSubjectExactMatch(b.subject, registeredSubjects);
+      if (isExact) return false;
+      const match = findMatchingSubject(b, registeredSubjects);
+      return Boolean(match);
+    });
+  }, [banks, registeredSubjects]);
+
+  // Collect unique subjects: prioritize registered subjects from Menu Mata Pelajaran, then any other in banks
+  const uniqueSubjects = Array.from(
+    new Set([
+      ...registeredSubjects.map((s) => s.name),
+      ...banks.map((b) => b.subject),
+    ].filter(Boolean))
+  );
 
   const filtered = banks.filter((b) => {
     const matchesSearch =
@@ -47,7 +80,13 @@ export const BankSoalView: React.FC<BankSoalViewProps> = ({ banks, setBanks, set
       b.token.toLowerCase().includes(searchTerm.toLowerCase()) ||
       b.teacher_name.toLowerCase().includes(searchTerm.toLowerCase());
 
-    const matchesSubject = selectedSubjectFilter === 'ALL' || b.subject === selectedSubjectFilter;
+    const bSubj = (b.subject || '').trim().toLowerCase();
+    const filterSubj = selectedSubjectFilter.trim().toLowerCase();
+    const matchesSubject =
+      selectedSubjectFilter === 'ALL' ||
+      bSubj === filterSubj ||
+      bSubj.includes(filterSubj) ||
+      filterSubj.includes(bSubj);
 
     return matchesSearch && matchesSubject;
   });
@@ -77,20 +116,62 @@ export const BankSoalView: React.FC<BankSoalViewProps> = ({ banks, setBanks, set
     }, 3000);
   };
 
+  const handleQuickSyncSubject = (bank: QuestionBank, newSubject: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    const updated = banks.map((b) =>
+      b.id === bank.id ? { ...b, subject: newSubject, updatedAt: new Date().toISOString() } : b
+    );
+    setBanks(updated);
+    saveStoredBanks(updated);
+    broadcastAppDataChange({ banks: updated });
+    saveAppDataToFirestore({ banks: updated });
+    addToast(
+      'success',
+      `Mata pelajaran untuk "${bank.title}" berhasil disinkronkan ke "${newSubject}".`,
+      'Mapel Disinkronkan'
+    );
+  };
+
+  const handleSyncAllSubjects = () => {
+    const { updatedBanks, changedCount } = autoSyncBanksWithSubjects(banks, registeredSubjects);
+    if (changedCount === 0) {
+      addToast('info', 'Semua paket soal sudah sinkron dengan Menu Mata Pelajaran.', 'Sudah Sinkron');
+      return;
+    }
+    setBanks(updatedBanks);
+    saveStoredBanks(updatedBanks);
+    broadcastAppDataChange({ banks: updatedBanks });
+    saveAppDataToFirestore({ banks: updatedBanks });
+    addToast(
+      'success',
+      `Berhasil menyinkronkan ${changedCount} paket soal dengan Menu Mata Pelajaran!`,
+      'Mata Pelajaran Tersinkron'
+    );
+  };
+
   const handleEditBank = (bank: QuestionBank, questionIndex = 0) => {
     setEditingBank(bank);
     setEditingQuestionIndex(questionIndex);
   };
 
   const handleSaveEditedBank = (updatedBank: QuestionBank) => {
-    setBanks((prev) => prev.map((b) => (b.id === updatedBank.id ? updatedBank : b)));
-    if (previewBank?.id === updatedBank.id) {
-      setPreviewBank(updatedBank);
+    const bankWithTimestamp: QuestionBank = {
+      ...updatedBank,
+      updatedAt: new Date().toISOString(),
+    };
+    const updated = banks.map((b) => (b.id === bankWithTimestamp.id ? bankWithTimestamp : b));
+    setBanks(updated);
+    saveStoredBanks(updated);
+    broadcastAppDataChange({ banks: updated });
+    saveAppDataToFirestore({ banks: updated });
+
+    if (previewBank?.id === bankWithTimestamp.id) {
+      setPreviewBank(bankWithTimestamp);
     }
     setEditingBank(null);
     addToast(
       'success',
-      `Paket soal "${updatedBank.title}" berhasil diperbarui.`,
+      `Paket soal "${bankWithTimestamp.title}" berhasil diperbarui dan tersimpan permanen.`,
       'Perubahan Tersimpan'
     );
   };
@@ -103,7 +184,12 @@ export const BankSoalView: React.FC<BankSoalViewProps> = ({ banks, setBanks, set
     if (!deleteConfirmTarget) return;
     const targetTitle = deleteConfirmTarget.title;
     const targetId = deleteConfirmTarget.id;
-    setBanks((prev) => prev.filter((b) => b.id !== targetId));
+    const updated = banks.filter((b) => b.id !== targetId);
+    setBanks(updated);
+    saveStoredBanks(updated);
+    broadcastAppDataChange({ banks: updated });
+    saveAppDataToFirestore({ banks: updated });
+
     if (previewBank?.id === targetId) setPreviewBank(null);
     setDeleteConfirmTarget(null);
     addToast('success', `Paket soal "${targetTitle}" berhasil dihapus dari Bank Soal.`, 'Berhasil Dihapus');
@@ -139,19 +225,37 @@ export const BankSoalView: React.FC<BankSoalViewProps> = ({ banks, setBanks, set
           </select>
         </div>
 
-        <button
-          onClick={() => setActiveTab('pembuat-soal-ai')}
-          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-md shadow-indigo-600/20 transition-colors shrink-0"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Tambah Paket Soal</span>
-        </button>
+        <div className="flex items-center gap-2">
+          {banksNeedingSync.length > 0 && (
+            <button
+              onClick={handleSyncAllSubjects}
+              className="px-3 py-2 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all shadow-xs shrink-0 cursor-pointer"
+              title="Singkronkan nama mata pelajaran paket soal dengan Menu Mata Pelajaran"
+            >
+              <Sparkles className="w-4 h-4 text-amber-400" />
+              <span>Singkronkan Mapel ({banksNeedingSync.length})</span>
+            </button>
+          )}
+
+          <button
+            onClick={() => setActiveTab('pembuat-soal-ai')}
+            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-md shadow-indigo-600/20 transition-colors shrink-0"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Tambah Paket Soal</span>
+          </button>
+        </div>
       </div>
 
       {/* Grid of Bank Soal */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {filtered.map((bank) => {
           const isCopied = copiedToken === bank.token;
+          const matchedSubject = findRegisteredSubjectMatch(bank);
+          const isExactRegistered = registeredSubjects.some(
+            (s) => s.name.trim().toLowerCase() === (bank.subject || '').trim().toLowerCase()
+          );
+
           return (
             <div
               key={bank.id}
@@ -186,9 +290,33 @@ export const BankSoalView: React.FC<BankSoalViewProps> = ({ banks, setBanks, set
                 <h3 className="font-black text-slate-100 text-sm leading-snug line-clamp-2">{bank.title}</h3>
 
                 <div className="text-xs text-slate-400 space-y-1.5 pt-2 border-t border-slate-800">
-                  <div className="flex items-center gap-1.5 font-semibold text-indigo-400">
-                    <BookOpen className="w-3.5 h-3.5 text-indigo-400" />
-                    <span>{bank.subject}</span>
+                  <div className="flex items-center justify-between gap-1">
+                    <button
+                      onClick={() => handleEditBank(bank, 0)}
+                      className="flex items-center gap-1.5 font-semibold text-indigo-400 truncate cursor-pointer hover:text-indigo-300 transition-colors text-left"
+                      title="Klik untuk ubah mata pelajaran paket ini"
+                    >
+                      <BookOpen className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                      <span className="truncate">{bank.subject}</span>
+                    </button>
+                    {!isExactRegistered && matchedSubject && (
+                      <button
+                        onClick={(e) => handleQuickSyncSubject(bank, matchedSubject.name, e)}
+                        className="text-[10px] bg-indigo-950/90 hover:bg-indigo-900 text-indigo-300 hover:text-white border border-indigo-700/60 px-2 py-0.5 rounded-md font-bold transition-all shrink-0 flex items-center gap-1 cursor-pointer shadow-xs"
+                        title={`Klik untuk sinkronkan mata pelajaran ke "${matchedSubject.name}" dari Menu Mapel`}
+                      >
+                        <Sparkles className="w-2.5 h-2.5 text-amber-400" /> Sync: {matchedSubject.name}
+                      </button>
+                    )}
+                    {!isExactRegistered && !matchedSubject && (
+                      <button
+                        onClick={() => handleEditBank(bank, 0)}
+                        className="text-[10px] bg-amber-950/70 hover:bg-amber-900 text-amber-300 border border-amber-700/50 px-1.5 py-0.5 rounded font-bold transition-all shrink-0 cursor-pointer"
+                        title="Mata pelajaran ini belum terdaftar di Menu Mapel. Klik untuk pilih mapel resmi."
+                      >
+                        Pilih Mapel
+                      </button>
+                    )}
                   </div>
                   <div className="flex items-center gap-1.5 text-slate-300">
                     <Layers className="w-3.5 h-3.5 text-slate-400" />
@@ -386,6 +514,7 @@ export const BankSoalView: React.FC<BankSoalViewProps> = ({ banks, setBanks, set
         isOpen={!!editingBank}
         bank={editingBank}
         initialQuestionIndex={editingQuestionIndex}
+        subjects={registeredSubjects}
         onClose={() => setEditingBank(null)}
         onSave={handleSaveEditedBank}
       />

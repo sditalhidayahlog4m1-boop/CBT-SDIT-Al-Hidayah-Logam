@@ -89,6 +89,7 @@ export interface QuestionBank {
   createdAt: string;
   durationMinutes: number;
   minWorkingMinutes?: number;
+  updatedAt?: string;
 }
 
 export interface ExamResult {

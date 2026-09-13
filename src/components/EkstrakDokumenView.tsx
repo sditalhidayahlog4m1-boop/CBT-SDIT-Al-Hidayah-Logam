@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   FileText,
   Sparkles,
@@ -11,21 +11,38 @@ import {
   Database,
   Trash2,
   RefreshCw,
+  ListFilter,
+  PenTool,
 } from 'lucide-react';
-import { QuestionBank, Question, QuestionOption, ActiveTab } from '../types';
+import { QuestionBank, Question, QuestionOption, ActiveTab, Subject, Teacher } from '../types';
+import { getStoredSubjects } from '../utils/storage';
 
 interface EkstrakDokumenViewProps {
   onSaveBank: (bank: QuestionBank) => void;
   setActiveTab: (tab: ActiveTab) => void;
+  subjects?: Subject[];
+  teachers?: Teacher[];
+  students?: any[];
+  banks?: QuestionBank[];
 }
 
 export const EkstrakDokumenView: React.FC<EkstrakDokumenViewProps> = ({
   onSaveBank,
   setActiveTab,
+  subjects,
+  teachers,
 }) => {
+  // Synchronize master subjects from Menu Mata Pelajaran
+  const subjectList = useMemo(() => {
+    if (subjects && subjects.length > 0) return subjects;
+    return getStoredSubjects();
+  }, [subjects]);
+
   const [formTitle, setFormTitle] = useState('');
+  const [subject, setSubject] = useState(() => subjectList[0]?.name || '');
+  const [isCustomSubject, setIsCustomSubject] = useState(false);
   const [documentText, setDocumentText] = useState('');
-  const [teacherName, setTeacherName] = useState('Guru Pengampu');
+  const [teacherName, setTeacherName] = useState(() => teachers?.[0]?.name || 'Guru Pengampu');
   const [gradeLevel, setGradeLevel] = useState('Kelas 6');
   const [classRoom, setClassRoom] = useState('6');
   const [durationMinutes, setDurationMinutes] = useState(60);
@@ -164,11 +181,14 @@ export const EkstrakDokumenView: React.FC<EkstrakDokumenViewProps> = ({
 
           const tokenToUse = examToken.trim() || Math.random().toString(36).substring(2, 8).toUpperCase();
 
+          const chosenSubject = subject.trim() || formTitle.split('–')[0]?.split('-')[0]?.trim() || 'Umum';
+          const finalTitle = formTitle.trim() || `${chosenSubject} - Kelas ${classRoom}`;
+
           const newBank: QuestionBank = {
             id: `bank-ext-${Date.now()}`,
-            title: formTitle.trim(),
+            title: finalTitle,
             teacher_name: teacherName || 'Guru Pengampu',
-            subject: formTitle.split('–')[0]?.split('-')[0]?.trim() || 'Umum',
+            subject: chosenSubject,
             grade_level: gradeLevel,
             class_room: classRoom,
             total_questions: parsed.length,
@@ -236,18 +256,91 @@ export const EkstrakDokumenView: React.FC<EkstrakDokumenViewProps> = ({
 
         {/* Input Form Fields */}
         <div className="space-y-6 text-xs sm:text-sm">
-          {/* Field 1: Nama Mata Pelajaran / Judul Form */}
-          <div className="space-y-2">
-            <label className="block font-bold text-slate-800 text-xs sm:text-sm">
-              Nama Mata Pelajaran / Judul Form:
-            </label>
-            <input
-              type="text"
-              value={formTitle}
-              onChange={(e) => setFormTitle(e.target.value)}
-              placeholder="Contoh: ASAS 2026 – PAI KELAS 6"
-              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder-slate-400 font-semibold focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all shadow-xs"
-            />
+          {/* Field 1: Mata Pelajaran (Sync dengan Menu Mapel) & Judul Form */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Mata Pelajaran Dropdown / Input */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="block font-bold text-slate-800 text-xs sm:text-sm flex items-center gap-1.5">
+                  <BookOpen className="w-4 h-4 text-emerald-600" />
+                  <span>Mata Pelajaran (Tersinkronisasi):</span>
+                </label>
+                <div className="flex items-center gap-2">
+                  {subjectList.length > 0 && !isCustomSubject && (
+                    <span className="text-[10px] text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                      {subjectList.length} Mapel Tersedia
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setIsCustomSubject(!isCustomSubject)}
+                    className="text-[10px] font-bold text-emerald-700 hover:text-emerald-900 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 px-2 py-0.5 rounded-md transition-all flex items-center gap-1 cursor-pointer"
+                  >
+                    {isCustomSubject ? (
+                      <>
+                        <ListFilter className="w-3 h-3" /> Pilih dari List
+                      </>
+                    ) : (
+                      <>
+                        <PenTool className="w-3 h-3" /> Ketik Manual
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {isCustomSubject ? (
+                <input
+                  type="text"
+                  value={subject}
+                  onChange={(e) => setSubject(e.target.value)}
+                  placeholder="Ketik mata pelajaran kustom..."
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-emerald-400 rounded-xl text-slate-900 font-semibold focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all text-xs sm:text-sm"
+                />
+              ) : (
+                <select
+                  value={subjectList.some((s) => s.name.toLowerCase() === subject.toLowerCase()) ? subject : ''}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val === '__MANUAL__') {
+                      setIsCustomSubject(true);
+                    } else if (val) {
+                      setSubject(val);
+                      if (!formTitle || formTitle.trim() === '') {
+                        setFormTitle(`${val} - Kelas ${classRoom}`);
+                      }
+                      const found = subjectList.find((s) => s.name === val);
+                      if (found && found.gradeLevel) {
+                        setGradeLevel(found.gradeLevel);
+                      }
+                    }
+                  }}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-semibold focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all text-xs sm:text-sm cursor-pointer"
+                >
+                  <option value="">-- Pilih Mata Pelajaran (Menu Mapel) --</option>
+                  {subjectList.map((s) => (
+                    <option key={s.id || s.name} value={s.name}>
+                      {s.name} {s.code ? `[${s.code}]` : ''} {s.gradeLevel ? `(${s.gradeLevel})` : ''}
+                    </option>
+                  ))}
+                  <option value="__MANUAL__">✏️ Ketik Mapel Manual...</option>
+                </select>
+              )}
+            </div>
+
+            {/* Judul Form / Paket Soal */}
+            <div className="space-y-1.5">
+              <label className="block font-bold text-slate-800 text-xs sm:text-sm">
+                Judul Paket Ujian / Form:
+              </label>
+              <input
+                type="text"
+                value={formTitle}
+                onChange={(e) => setFormTitle(e.target.value)}
+                placeholder={subject ? `Contoh: ASAS 2026 – ${subject} Kelas ${classRoom}` : 'Contoh: ASAS 2026 – PAI KELAS 6'}
+                className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder-slate-400 font-semibold focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all text-xs sm:text-sm shadow-xs"
+              />
+            </div>
           </div>
 
           {/* Additional CBT Metadata Row */}

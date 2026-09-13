@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Save,
   X,
@@ -18,14 +18,21 @@ import {
   Image as ImageIcon,
   Upload,
   Eye,
+  ListFilter,
+  PenTool,
+  Sparkles,
 } from 'lucide-react';
-import { QuestionBank, Question, QuestionOption } from '../types';
+import { QuestionBank, Question, QuestionOption, Subject } from '../types';
 import { normalizeQuestion } from '../utils/normalizeQuestion';
+import { getStoredSubjects } from '../utils/storage';
+import { findMatchingSubject } from '../utils/subjectMatcher';
 
 interface EditBankSoalModalProps {
   bank: QuestionBank | null;
   initialQuestionIndex?: number;
+  initialTab?: 'soal' | 'info';
   isOpen: boolean;
+  subjects?: Subject[];
   onClose: () => void;
   onSave: (updatedBank: QuestionBank) => void;
 }
@@ -33,10 +40,20 @@ interface EditBankSoalModalProps {
 export const EditBankSoalModal: React.FC<EditBankSoalModalProps> = ({
   bank,
   initialQuestionIndex = 0,
+  initialTab = 'info',
   isOpen,
+  subjects,
   onClose,
   onSave,
 }) => {
+  // Synchronize master subjects with Menu Mata Pelajaran
+  const subjectList = useMemo(() => {
+    if (subjects && subjects.length > 0) return subjects;
+    return getStoredSubjects();
+  }, [subjects]);
+
+  const [isCustomSubject, setIsCustomSubject] = useState(false);
+
   // Metadata states
   const [title, setTitle] = useState(bank?.title || '');
   const [subject, setSubject] = useState(bank?.subject || '');
@@ -52,20 +69,42 @@ export const EditBankSoalModal: React.FC<EditBankSoalModalProps> = ({
   // Questions state
   const [questions, setQuestions] = useState<Question[]>([]);
   const [activeQIndex, setActiveQIndex] = useState(initialQuestionIndex);
-  const [activeTab, setActiveTab] = useState<'soal' | 'info'>('soal');
+  const [activeTab, setActiveTab] = useState<'soal' | 'info'>(initialTab);
   const [errorMessage, setErrorMessage] = useState('');
+
+  // Find suggested mapel if current subject doesn't exactly match registered mapel
+  const suggestedMapel = useMemo(() => {
+    if (!subject || subjectList.length === 0) return null;
+    const lower = subject.trim().toLowerCase();
+    const exact = subjectList.some((s) => s.name.trim().toLowerCase() === lower);
+    if (exact) return null;
+
+    return findMatchingSubject(bank ? { ...bank, subject } : subject, subjectList);
+  }, [subject, subjectList, bank]);
 
   // Initialize questions on bank change
   useEffect(() => {
     if (isOpen && bank) {
+      setActiveTab(initialTab);
       setTitle(bank.title || '');
-      setSubject(bank.subject || '');
+      const bankSubj = bank.subject || '';
+      setSubject(bankSubj);
       setTeacherName(bank.teacher_name || '');
       setGradeLevel(bank.grade_level || 'SD / MI');
       setClassRoom(bank.class_room || 'Semua Kelas');
       setToken(bank.token || '');
       setDurationMinutes(bank.durationMinutes || 45);
       setMinWorkingMinutes(bank.minWorkingMinutes !== undefined ? bank.minWorkingMinutes : 30);
+
+      const isRegistered = subjectList.some(
+        (s) => s.name.trim().toLowerCase() === bankSubj.trim().toLowerCase()
+      );
+      if (!bankSubj && subjectList.length > 0) {
+        setSubject(subjectList[0].name);
+        setIsCustomSubject(false);
+      } else {
+        setIsCustomSubject(!isRegistered && Boolean(bankSubj) && subjectList.length > 0);
+      }
 
       // Normalize all existing questions to standard Question format
       const standardQuestions: Question[] = (bank.questions || []).map((q, idx) => {
@@ -320,6 +359,7 @@ export const EditBankSoalModal: React.FC<EditBankSoalModalProps> = ({
       total_questions: questions.length,
       durationMinutes: Number(durationMinutes) || 45,
       minWorkingMinutes: Number(minWorkingMinutes) || 30,
+      updatedAt: new Date().toISOString(),
       questions: questions.map((q, idx) => ({ ...q, question_number: idx + 1 })),
     };
 
@@ -388,6 +428,17 @@ export const EditBankSoalModal: React.FC<EditBankSoalModalProps> = ({
         {/* TAB SELECTOR */}
         <div className="flex border-b border-slate-800 bg-slate-900/80 px-4 sm:px-6">
           <button
+            onClick={() => setActiveTab('info')}
+            className={`py-3 px-4 text-xs font-bold border-b-2 flex items-center gap-2 transition-all cursor-pointer ${
+              activeTab === 'info'
+                ? 'border-indigo-500 text-indigo-400 bg-indigo-500/10'
+                : 'border-transparent text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Layers className="w-4 h-4" />
+            <span>Mata Pelajaran & Info Paket</span>
+          </button>
+          <button
             onClick={() => setActiveTab('soal')}
             className={`py-3 px-4 text-xs font-bold border-b-2 flex items-center gap-2 transition-all cursor-pointer ${
               activeTab === 'soal'
@@ -397,17 +448,6 @@ export const EditBankSoalModal: React.FC<EditBankSoalModalProps> = ({
           >
             <BookOpen className="w-4 h-4" />
             <span>Edit Butir Pertanyaan ({questions.length} Soal)</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('info')}
-            className={`py-3 px-4 text-xs font-bold border-b-2 flex items-center gap-2 transition-all cursor-pointer ${
-              activeTab === 'info'
-                ? 'border-indigo-500 text-indigo-400 bg-indigo-500/10'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Layers className="w-4 h-4" />
-            <span>Pengaturan Judul & Waktu Paket</span>
           </button>
         </div>
 
@@ -435,17 +475,105 @@ export const EditBankSoalModal: React.FC<EditBankSoalModalProps> = ({
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label className="block font-bold text-slate-300 mb-1 flex items-center gap-1.5">
-                      <BookOpen className="w-3.5 h-3.5 text-indigo-400" />
-                      <span>Mata Pelajaran *</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={subject}
-                      onChange={(e) => setSubject(e.target.value)}
-                      placeholder="Contoh: PAI, Matematika, IPA"
-                      className="w-full px-3.5 py-2.5 bg-slate-800 border border-slate-700 rounded-xl font-semibold text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    />
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block font-bold text-slate-300 flex items-center gap-1.5">
+                        <BookOpen className="w-3.5 h-3.5 text-indigo-400" />
+                        <span>Mata Pelajaran *</span>
+                      </label>
+                      <div className="flex items-center gap-2">
+                        {subjectList.length > 0 && !isCustomSubject && (
+                          <span className="text-[10px] text-emerald-400 font-semibold hidden sm:inline-flex items-center gap-1">
+                            <CheckCircle2 className="w-3 h-3" /> {subjectList.length} Mapel Terdaftar
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => setIsCustomSubject(!isCustomSubject)}
+                          className="text-[10px] font-bold text-indigo-300 hover:text-white bg-indigo-950/80 hover:bg-indigo-900 border border-indigo-700/60 px-2 py-0.5 rounded-md transition-all flex items-center gap-1 cursor-pointer"
+                        >
+                          {isCustomSubject ? (
+                            <>
+                              <ListFilter className="w-3 h-3 text-indigo-400" /> Pilih dari List
+                            </>
+                          ) : (
+                            <>
+                              <PenTool className="w-3 h-3 text-indigo-400" /> Ketik Manual
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+
+                    {isCustomSubject ? (
+                      <input
+                        type="text"
+                        value={subject}
+                        onChange={(e) => setSubject(e.target.value)}
+                        placeholder="Contoh: PAI, Matematika, IPA"
+                        className="w-full px-3.5 py-2.5 bg-slate-800 border border-indigo-500/60 rounded-xl font-semibold text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-xs"
+                      />
+                    ) : (
+                      <select
+                        value={
+                          subjectList.some((s) => s.name.toLowerCase() === subject.trim().toLowerCase())
+                            ? subjectList.find((s) => s.name.toLowerCase() === subject.trim().toLowerCase())?.name || subject
+                            : subject
+                            ? '__CURRENT_CUSTOM__'
+                            : ''
+                        }
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          if (val === '__MANUAL__') {
+                            setIsCustomSubject(true);
+                          } else if (val && val !== '__CURRENT_CUSTOM__') {
+                            setSubject(val);
+                            const found = subjectList.find((s) => s.name === val);
+                            if (found && found.gradeLevel) {
+                              setGradeLevel(found.gradeLevel);
+                            }
+                          }
+                        }}
+                        className="w-full px-3.5 py-2.5 bg-slate-800 border border-slate-700 rounded-xl font-semibold text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer text-xs"
+                      >
+                        <option value="">-- Pilih Mata Pelajaran (Menu Mapel) --</option>
+                        {subject && !subjectList.some((s) => s.name.toLowerCase() === subject.trim().toLowerCase()) && (
+                          <option value="__CURRENT_CUSTOM__">
+                            ⚠️ [Mapel Saat Ini]: {subject}
+                          </option>
+                        )}
+                        {subjectList.map((s) => (
+                          <option key={s.id || s.name} value={s.name}>
+                            {s.name} {s.code ? `[${s.code}]` : ''} {s.gradeLevel ? `(${s.gradeLevel})` : ''}
+                          </option>
+                        ))}
+                        <option value="__MANUAL__">✏️ Ketik Mapel Kustom / Manual...</option>
+                      </select>
+                    )}
+
+                    {/* Helper banner if current mapel differs from master menu */}
+                    {suggestedMapel && (
+                      <div className="mt-2 p-2.5 bg-amber-500/10 border border-amber-500/25 rounded-xl flex items-center justify-between gap-2 text-xs text-amber-200">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                          <span className="truncate text-[11px]">
+                            Mapel terdaftar: <strong>{suggestedMapel.name}</strong>
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSubject(suggestedMapel.name);
+                            if (suggestedMapel.gradeLevel) {
+                              setGradeLevel(suggestedMapel.gradeLevel);
+                            }
+                            setIsCustomSubject(false);
+                          }}
+                          className="px-2.5 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-lg text-[11px] shrink-0 transition-colors shadow-xs cursor-pointer"
+                        >
+                          Singkronkan
+                        </button>
+                      </div>
+                    )}
                   </div>
 
                   <div>

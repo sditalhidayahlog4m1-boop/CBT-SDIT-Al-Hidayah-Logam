@@ -20,6 +20,8 @@ import {
   Pin,
   Rocket,
   Image as ImageIcon,
+  ListFilter,
+  PenTool,
 } from 'lucide-react';
 import { QuestionBank, AuthUser, Teacher, Subject, Student, Question, QuestionOption } from '../types';
 import {
@@ -221,6 +223,7 @@ export const ManualQuestionBuilder: React.FC<ManualQuestionBuilderProps> = ({
     }
     return subjectList[0]?.name || '';
   });
+  const [isCustomSubject, setIsCustomSubject] = useState(false);
   const [gradeLevel, setGradeLevel] = useState(() => {
     const foundSub = subjectList.find((s) => s.name.toLowerCase() === subject.toLowerCase());
     return foundSub?.gradeLevel || gradeLevelsList[0] || 'SD / MI';
@@ -497,16 +500,79 @@ export const ManualQuestionBuilder: React.FC<ManualQuestionBuilderProps> = ({
 
             {/* Mata Pelajaran */}
             <div>
-              <label className="block text-xs font-bold text-slate-300 mb-1.5 flex items-center gap-1.5">
-                <BookOpen className="w-3.5 h-3.5 text-indigo-400" /> Mata Pelajaran
-              </label>
-              <input
-                type="text"
-                placeholder="Mata Pelajaran..."
-                value={subject}
-                onChange={(e) => setSubject(e.target.value)}
-                className="w-full px-3.5 py-2.5 bg-slate-800 border border-slate-700 text-slate-100 placeholder-slate-500 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
-              />
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                  <BookOpen className="w-3.5 h-3.5 text-indigo-400" /> Mata Pelajaran *
+                </label>
+                <div className="flex items-center gap-2">
+                  {subjectList.length > 0 && !isCustomSubject && (
+                    <span className="text-[10px] text-emerald-400 font-semibold hidden sm:inline-flex items-center gap-1">
+                      <CheckCircle2 className="w-3 h-3" /> {subjectList.length} Mapel
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setIsCustomSubject(!isCustomSubject)}
+                    className="text-[10px] font-bold text-indigo-300 hover:text-white bg-indigo-950/80 hover:bg-indigo-900 border border-indigo-700/60 px-2 py-0.5 rounded-md transition-all flex items-center gap-1 cursor-pointer"
+                  >
+                    {isCustomSubject ? (
+                      <>
+                        <ListFilter className="w-3 h-3 text-indigo-400" /> Pilih dari List
+                      </>
+                    ) : (
+                      <>
+                        <PenTool className="w-3 h-3 text-indigo-400" /> Ketik Manual
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {isCustomSubject ? (
+                <input
+                  type="text"
+                  placeholder="Ketik mata pelajaran manual..."
+                  value={subject}
+                  onChange={(e) => setSubject(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-slate-800 border border-indigo-500/60 text-slate-100 placeholder-slate-500 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
+                />
+              ) : (
+                <select
+                  value={
+                    subjectList.some((s) => s.name.toLowerCase() === subject.toLowerCase())
+                      ? subjectList.find((s) => s.name.toLowerCase() === subject.toLowerCase())?.name || subject
+                      : subject
+                      ? '__CURRENT_CUSTOM__'
+                      : ''
+                  }
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val === '__MANUAL__') {
+                      setIsCustomSubject(true);
+                    } else if (val && val !== '__CURRENT_CUSTOM__') {
+                      setSubject(val);
+                      const found = subjectList.find((s) => s.name === val);
+                      if (found && found.gradeLevel) {
+                        setGradeLevel(found.gradeLevel);
+                      }
+                    }
+                  }}
+                  className="w-full px-3.5 py-2.5 bg-slate-800 border border-slate-700 text-slate-100 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium cursor-pointer"
+                >
+                  <option value="">-- Pilih Mata Pelajaran (Menu Mapel) --</option>
+                  {subject && !subjectList.some((s) => s.name.toLowerCase() === subject.toLowerCase()) && (
+                    <option value="__CURRENT_CUSTOM__">
+                      ⚠️ [Kustom]: {subject}
+                    </option>
+                  )}
+                  {subjectList.map((s) => (
+                    <option key={s.id || s.name} value={s.name}>
+                      {s.name} {s.code ? `[${s.code}]` : ''} {s.gradeLevel ? `(${s.gradeLevel})` : ''}
+                    </option>
+                  ))}
+                  <option value="__MANUAL__">✏️ Ketik Manual...</option>
+                </select>
+              )}
             </div>
 
             {/* Jenjang */}

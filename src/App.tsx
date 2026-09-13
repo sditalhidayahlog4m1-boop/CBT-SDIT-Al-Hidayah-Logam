@@ -80,6 +80,7 @@ import {
 } from './utils/firebaseSync';
 import { subscribeToLocalSync, broadcastAppDataChange } from './utils/syncEngine';
 import { isDeepEqual } from './utils/deepEqual';
+import { autoSyncBanksWithSubjects } from './utils/subjectMatcher';
 import {
   getCurrentHistoryState,
   pushNavigationState,
@@ -125,6 +126,7 @@ export default function App() {
   // Track last synced data from Firestore to prevent unnecessary write loops
   const lastSyncedDataRef = useRef<AppData | null>(null);
   const hasFinishedInitialSyncRef = useRef(false);
+  const lastLocalBankEditTimeRef = useRef<number>(0);
 
   // State refs for listener closures
   const teachersRef = useRef(teachers);
@@ -225,10 +227,47 @@ export default function App() {
       saveStoredSubjects(data.subjects);
       lastSyncedDataRef.current.subjects = data.subjects;
     }
-    if (Array.isArray(data.banks) && !isDeepEqual(banksRef.current, data.banks)) {
-      setBanks(data.banks);
-      saveStoredBanks(data.banks);
-      lastSyncedDataRef.current.banks = data.banks;
+    if (Array.isArray(data.banks)) {
+      const isRecentlyEditedLocally = Date.now() - lastLocalBankEditTimeRef.current < 25000;
+      let mergedBanks = [...data.banks];
+
+      if (isRecentlyEditedLocally) {
+        // Protect locally edited banks from being overwritten by stale remote polling/snapshots
+        const localBanks = banksRef.current || [];
+        mergedBanks = mergedBanks.map((remoteB) => {
+          const localB = localBanks.find((l) => l.id === remoteB.id);
+          if (localB) {
+            const localTime = localB.updatedAt ? new Date(localB.updatedAt).getTime() : 0;
+            const remoteTime = remoteB.updatedAt ? new Date(remoteB.updatedAt).getTime() : 0;
+            if (localTime >= remoteTime) {
+              return localB;
+            }
+          }
+          return remoteB;
+        });
+
+        // Ensure any local banks not yet present in remote are preserved
+        localBanks.forEach((l) => {
+          if (!mergedBanks.some((m) => m.id === l.id)) {
+            mergedBanks.push(l);
+          }
+        });
+      }
+
+      // Auto-normalize bank subjects with registered master subjects
+      const curSubjects = subjectsRef.current || [];
+      if (curSubjects.length > 0) {
+        const { updatedBanks } = autoSyncBanksWithSubjects(mergedBanks, curSubjects);
+        mergedBanks = updatedBanks;
+      }
+
+      if (!isDeepEqual(banksRef.current, mergedBanks)) {
+        setBanks(mergedBanks);
+        saveStoredBanks(mergedBanks);
+        if (lastSyncedDataRef.current) {
+          lastSyncedDataRef.current.banks = mergedBanks;
+        }
+      }
     }
     if (Array.isArray(data.results) && !isDeepEqual(resultsRef.current, data.results)) {
       setResults(data.results);
@@ -666,12 +705,37 @@ export default function App() {
 
   useEffect(() => {
     saveStoredBanks(banks);
-    if (hasFinishedInitialSyncRef.current && !isDeepEqual(lastSyncedDataRef.current.banks, banks)) {
-      lastSyncedDataRef.current.banks = banks;
+    if (
+      hasFinishedInitialSyncRef.current &&
+      (!lastSyncedDataRef.current?.banks || !isDeepEqual(lastSyncedDataRef.current.banks, banks))
+    ) {
+      if (lastSyncedDataRef.current) {
+        lastSyncedDataRef.current.banks = banks;
+      }
       broadcastAppDataChange({ banks });
       saveAppDataToFirestore({ banks });
     }
   }, [banks]);
+
+  // Auto-sync question banks with master registered subjects whenever registered subjects change or on load
+  useEffect(() => {
+    if (subjects.length > 0 && banks.length > 0) {
+      const { updatedBanks, changedCount } = autoSyncBanksWithSubjects(banks, subjects);
+      if (changedCount > 0) {
+        console.log(
+          `[AutoSync] Automatically synchronized ${changedCount} question bank subjects to match Menu Mata Pelajaran`
+        );
+        setBanks(updatedBanks);
+        saveStoredBanks(updatedBanks);
+        lastLocalBankEditTimeRef.current = Date.now();
+        if (lastSyncedDataRef.current) {
+          lastSyncedDataRef.current.banks = updatedBanks;
+        }
+        broadcastAppDataChange({ banks: updatedBanks });
+        saveAppDataToFirestore({ banks: updatedBanks });
+      }
+    }
+  }, [subjects]);
 
   useEffect(() => {
     saveStoredResults(results);
@@ -791,10 +855,19 @@ export default function App() {
 
   // Handler when AI Generator or Upload saves new Question Bank
   const handleSaveBank = (newBank: QuestionBank) => {
+    const bankWithTime: QuestionBank = {
+      ...newBank,
+      updatedAt: new Date().toISOString(),
+    };
     setBanks((prev) => {
-      const filtered = prev.filter((b) => b.id !== newBank.id);
-      const updated = [newBank, ...filtered];
+      const filtered = prev.filter((b) => b.id !== bankWithTime.id);
+      const updated = [bankWithTime, ...filtered];
       saveStoredBanks(updated);
+      lastLocalBankEditTimeRef.current = Date.now();
+      if (lastSyncedDataRef.current) {
+        lastSyncedDataRef.current.banks = updated;
+      }
+      broadcastAppDataChange({ banks: updated });
       saveAppDataToFirestore({ banks: updated });
       return updated;
     });
@@ -1139,7 +1212,12 @@ export default function App() {
           )}
 
           {activeTab === 'bank-soal' && (
-            <BankSoalView banks={banks} setBanks={setBanks} setActiveTab={handleNavigateTab} />
+            <BankSoalView
+              banks={banks}
+              setBanks={setBanks}
+              setActiveTab={handleNavigateTab}
+              subjects={subjects}
+            />
           )}
 
           {activeTab === 'kumpulan-jawaban' && <KumpulanJawabanView banks={banks} />}

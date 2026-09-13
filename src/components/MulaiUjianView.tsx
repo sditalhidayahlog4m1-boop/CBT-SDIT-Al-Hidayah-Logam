@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { QuestionBank, Student, AuthUser, Subject } from '../types';
 import { shuffleQuestionBank } from '../utils/storage';
+import { findMatchingSubject } from '../utils/subjectMatcher';
 
 interface MulaiUjianViewProps {
   banks: QuestionBank[];
@@ -68,14 +69,17 @@ export const MulaiUjianView: React.FC<MulaiUjianViewProps> = ({
     }
   }, [currentUser]);
 
-  // Generate subject list from registered subjects & banks
+  // Generate subject list prioritizing master registered subjects from Menu Mata Pelajaran
   const subjectList = React.useMemo(() => {
+    if (subjects && subjects.length > 0) {
+      const registeredNames = Array.from(
+        new Set(subjects.map((s) => s.name.trim()).filter(Boolean))
+      );
+      if (registeredNames.length > 0) return registeredNames;
+    }
     const list = new Set<string>();
-    subjects.forEach((s) => {
-      if (s.name) list.add(s.name);
-    });
     banks.forEach((b) => {
-      if (b.subject) list.add(b.subject);
+      if (b.subject) list.add(b.subject.trim());
     });
     return Array.from(list);
   }, [subjects, banks]);
@@ -101,14 +105,25 @@ export const MulaiUjianView: React.FC<MulaiUjianViewProps> = ({
 
     // Validate token against active bank soal
     const trimmedToken = tokenInput.trim().toUpperCase();
-    let matchedBank = banks.find(
+    const matchedBank = banks.find(
       (b) => b.token.trim().toUpperCase() === trimmedToken
     );
 
     // If a specific subject is selected, verify the token belongs to that subject
     if (selectedSubject !== 'all' && matchedBank) {
-      if (matchedBank.subject.toLowerCase() !== selectedSubject.toLowerCase()) {
-        setErrorMessage(`Token "${trimmedToken}" bukan untuk mata pelajaran ${selectedSubject}. Silakan pilih mata pelajaran yang sesuai atau ganti ke Semua Mata Pelajaran.`);
+      const bankSubj = (matchedBank.subject || '').trim().toLowerCase();
+      const selSubj = selectedSubject.trim().toLowerCase();
+      const matchedReg = findMatchingSubject(matchedBank, subjects);
+      const isMatch =
+        bankSubj === selSubj ||
+        bankSubj.includes(selSubj) ||
+        selSubj.includes(bankSubj) ||
+        (matchedReg && matchedReg.name.trim().toLowerCase() === selSubj);
+
+      if (!isMatch) {
+        setErrorMessage(
+          `Token "${trimmedToken}" adalah untuk mata pelajaran "${matchedBank.subject}", bukan "${selectedSubject}". Silakan pilih mata pelajaran "${matchedBank.subject}" atau pilih "-- Semua Mata Pelajaran --".`
+        );
         return;
       }
     }
