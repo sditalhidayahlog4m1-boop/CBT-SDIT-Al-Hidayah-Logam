@@ -667,20 +667,10 @@ export const HakAksesView: React.FC<HakAksesViewProps> = ({
           </table>
         </div>
 
-        {/* Footer info & Save CTA */}
-        <div className="p-5 border-t border-slate-800 bg-slate-950/60 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-2 text-xs text-slate-400">
-            <Info className="w-4 h-4 text-amber-400 shrink-0" />
-            <span>Perubahan hak akses disimpan otomatis di database sistem lokal (LocalStorage) dan bertahan selamanya.</span>
-          </div>
-
-          <button
-            onClick={handleSave}
-            className="px-6 py-3 bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-500 hover:from-amber-300 hover:to-yellow-300 text-slate-950 font-black rounded-2xl text-xs shadow-xl flex items-center gap-2 cursor-pointer transition-all active:scale-95 shrink-0"
-          >
-            <Save className="w-4 h-4 text-slate-950" />
-            <span>SIMPAN PERUBAHAN HAK AKSES</span>
-          </button>
+        {/* Footer info */}
+        <div className="p-4 sm:p-5 border-t border-slate-800 bg-slate-950/60 flex items-center gap-2 text-xs text-slate-400">
+          <Info className="w-4 h-4 text-amber-400 shrink-0" />
+          <span>Perubahan hak akses disimpan otomatis di database sistem lokal (LocalStorage) dan bertahan selamanya.</span>
         </div>
       </div>
 
