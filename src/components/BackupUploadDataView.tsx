@@ -199,89 +199,25 @@ export const BackupUploadDataView: React.FC<BackupUploadDataViewProps> = ({
     };
   };
 
-  // Initialize backup archives with seed if empty
+  // Initialize backup archives: load real stored backups only, permanently purge any default seed data
   useEffect(() => {
     const stored = getStoredBackupArchives();
-    if (stored && stored.length > 0) {
-      setBackupArchives(stored);
-    } else {
-      // Create initial sample seed matching previous backup history
-      const currentFull = createFullBackupPayload();
-      const currentDb = createDbBackupPayload();
+    // Permanently remove any legacy default seed items
+    const realOnly = (stored || []).filter((item) => item && typeof item.id === 'string' && !item.id.startsWith('seed-'));
+    saveStoredBackupArchives(realOnly);
+    setBackupArchives(realOnly);
 
-      const seedArchives: BackupArchiveItem[] = [
-        {
-          id: 'seed-backup-1',
-          fileName: 'CBTBackup_121232040235_20260913205232.json',
-          type: 'all',
-          sizeKb: 88.49,
-          createdAt: '2026-09-13T13:52:32.000Z',
-          formattedDate: '2026-09-13 20:52:32',
-          itemCounts: {
-            teachers: teachers.length,
-            students: students.length,
-            subjects: subjects.length,
-            banks: banks.length,
-            results: results.length,
-            dailyGrades: dailyGrades.length,
-          },
-          payload: currentFull,
-        },
-        {
-          id: 'seed-backup-2',
-          fileName: 'CBTBackup_121232040235_20260622055500.json',
-          type: 'all',
-          sizeKb: 87.36,
-          createdAt: '2026-06-22T05:55:00.000Z',
-          formattedDate: '2026-06-22 05:55:00',
-          itemCounts: {
-            teachers: teachers.length,
-            students: students.length,
-            subjects: subjects.length,
-            banks: banks.length,
-            results: results.length,
-            dailyGrades: dailyGrades.length,
-          },
-          payload: currentFull,
-        },
-        {
-          id: 'seed-backup-3',
-          fileName: 'CBTBackup_DB_121232040235_20260618125620.json',
-          type: 'db',
-          sizeKb: 84.29,
-          createdAt: '2026-06-18T12:56:20.000Z',
-          formattedDate: '2026-06-18 12:56:21',
-          itemCounts: {
-            teachers: teachers.length,
-            students: students.length,
-            subjects: subjects.length,
-            banks: banks.length,
-            results: results.length,
-            dailyGrades: dailyGrades.length,
-          },
-          payload: currentDb,
-        },
-        {
-          id: 'seed-backup-4',
-          fileName: 'CBTBackup_DB_121232040235_20260107161114.json',
-          type: 'db',
-          sizeKb: 65.87,
-          createdAt: '2026-01-07T16:11:15.000Z',
-          formattedDate: '2026-01-07 16:11:15',
-          itemCounts: {
-            teachers: teachers.length,
-            students: students.length,
-            subjects: subjects.length,
-            banks: banks.length,
-            results: results.length,
-            dailyGrades: dailyGrades.length,
-          },
-          payload: currentDb,
-        },
-      ];
-
-      saveStoredBackupArchives(seedArchives);
-      setBackupArchives(seedArchives);
+    // If no real backups exist, clear any default/seed backup timestamp
+    if (realOnly.length === 0) {
+      try {
+        const lastTime = localStorage.getItem('cbt_last_backup_time');
+        if (lastTime && (lastTime.includes('2026-09-13') || lastTime.includes('seed'))) {
+          localStorage.removeItem('cbt_last_backup_time');
+          setLastBackupTime(null);
+        }
+      } catch {
+        // ignore
+      }
     }
   }, []);
 
@@ -566,12 +502,23 @@ export const BackupUploadDataView: React.FC<BackupUploadDataViewProps> = ({
     }
   };
 
-  // Delete archive from Table (Concept Image 2)
+  // Delete archive from Table permanently
   const handleExecuteTableDelete = () => {
     if (!deleteTargetArchive) return;
     const updated = deleteStoredBackupArchive(deleteTargetArchive.id);
     setBackupArchives(updated);
-    setToastMessage(`Arsip cadangan ${deleteTargetArchive.fileName} telah dihapus dari daftar.`);
+    if (newlyCreatedArchive?.id === deleteTargetArchive.id) {
+      setNewlyCreatedArchive(null);
+    }
+    if (updated.length === 0) {
+      try {
+        localStorage.removeItem('cbt_last_backup_time');
+      } catch {
+        // ignore
+      }
+      setLastBackupTime(null);
+    }
+    setToastMessage(`Arsip cadangan ${deleteTargetArchive.fileName} telah dihapus permanen dan tidak akan kembali lagi.`);
     setDeleteTargetArchive(null);
   };
 
@@ -1471,17 +1418,17 @@ export const BackupUploadDataView: React.FC<BackupUploadDataViewProps> = ({
                 <Trash2 className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="font-extrabold text-slate-100 text-base">Hapus File Cadangan</h3>
-                <p className="text-xs text-slate-400">Hapus arsip dari riwayat sistem</p>
+                <h3 className="font-extrabold text-slate-100 text-base">Hapus Permanen File Cadangan</h3>
+                <p className="text-xs text-slate-400">Hapus arsip secara permanen dari sistem</p>
               </div>
             </div>
 
             <p className="text-xs text-slate-300 leading-relaxed">
               Apakah Anda yakin ingin menghapus file cadangan{' '}
-              <strong className="text-rose-300 font-mono">{deleteTargetArchive.fileName}</strong> dari daftar riwayat cadangan sistem?
+              <strong className="text-rose-300 font-mono">{deleteTargetArchive.fileName}</strong> secara permanen? File yang dihapus tidak akan kembali lagi ke dalam riwayat sistem.
             </p>
             <p className="text-[11px] text-slate-500">
-              Catatan: File yang sudah pernah Anda unduh ke komputer lokal Anda tidak akan terhapus.
+              Catatan: File cadangan yang sudah pernah Anda unduh ke perangkat Anda tidak akan terpengaruh.
             </p>
 
             <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-800">
@@ -1498,7 +1445,7 @@ export const BackupUploadDataView: React.FC<BackupUploadDataViewProps> = ({
                 className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-lg shadow-rose-600/30 transition-all cursor-pointer"
               >
                 <Trash2 className="w-4 h-4" />
-                <span>Ya, Hapus Cadangan</span>
+                <span>Ya, Hapus Permanen</span>
               </button>
             </div>
           </div>

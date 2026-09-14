@@ -472,7 +472,13 @@ export function getStoredBackupArchives(): BackupArchiveItem[] {
   try {
     const data = localStorage.getItem('cbt_backup_archives');
     if (!data) return [];
-    return JSON.parse(data) || [];
+    const list: BackupArchiveItem[] = JSON.parse(data) || [];
+    // Permanently remove any legacy seed- data so it never reappears
+    const sanitized = list.filter((a) => a && typeof a.id === 'string' && !a.id.startsWith('seed-'));
+    if (sanitized.length !== list.length) {
+      saveStoredBackupArchives(sanitized);
+    }
+    return sanitized;
   } catch {
     return [];
   }
@@ -480,7 +486,9 @@ export function getStoredBackupArchives(): BackupArchiveItem[] {
 
 export function saveStoredBackupArchives(archives: BackupArchiveItem[]): void {
   try {
-    localStorage.setItem('cbt_backup_archives', JSON.stringify(archives));
+    // Ensure no seed archives are ever persisted
+    const cleanArchives = (archives || []).filter((a) => a && typeof a.id === 'string' && !a.id.startsWith('seed-'));
+    localStorage.setItem('cbt_backup_archives', JSON.stringify(cleanArchives));
   } catch {
     // ignore
   }
