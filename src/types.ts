@@ -221,3 +221,21 @@ export interface RolePermissions {
   umum: ActiveTab[];
 }
 
+export interface BackupArchiveItem {
+  id: string;
+  fileName: string;
+  type: 'db' | 'all'; // 'db' = Database CBT, 'all' = Backup Semua
+  sizeKb: number;
+  createdAt: string; // ISO date string
+  formattedDate: string; // e.g. "2026-09-14 21:51:34"
+  itemCounts?: {
+    teachers: number;
+    students: number;
+    subjects: number;
+    banks: number;
+    results: number;
+    dailyGrades?: number;
+  };
+  payload: FullBackupData;
+}
+

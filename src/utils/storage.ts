@@ -1,4 +1,4 @@
-import { Teacher, Student, Subject, QuestionBank, ExamResult, AuthUser, RolePermissions, GameHistoryLog, UserLoginLog, DailyGradeRecord } from '../types';
+import { Teacher, Student, Subject, QuestionBank, ExamResult, AuthUser, RolePermissions, GameHistoryLog, UserLoginLog, DailyGradeRecord, BackupArchiveItem } from '../types';
 
 export function getStoredCurrentUser(): AuthUser | null {
   try {
@@ -467,5 +467,46 @@ export function saveStoredLastBackupTime(timeIso: string): void {
     // ignore
   }
 }
+
+export function getStoredBackupArchives(): BackupArchiveItem[] {
+  try {
+    const data = localStorage.getItem('cbt_backup_archives');
+    if (!data) return [];
+    return JSON.parse(data) || [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveStoredBackupArchives(archives: BackupArchiveItem[]): void {
+  try {
+    localStorage.setItem('cbt_backup_archives', JSON.stringify(archives));
+  } catch {
+    // ignore
+  }
+}
+
+export function addStoredBackupArchive(archive: BackupArchiveItem): BackupArchiveItem[] {
+  try {
+    const existing = getStoredBackupArchives();
+    const updated = [archive, ...existing.filter((a) => a.id !== archive.id)];
+    saveStoredBackupArchives(updated);
+    return updated;
+  } catch {
+    return [];
+  }
+}
+
+export function deleteStoredBackupArchive(id: string): BackupArchiveItem[] {
+  try {
+    const existing = getStoredBackupArchives();
+    const updated = existing.filter((a) => a.id !== id);
+    saveStoredBackupArchives(updated);
+    return updated;
+  } catch {
+    return [];
+  }
+}
+
 
 
