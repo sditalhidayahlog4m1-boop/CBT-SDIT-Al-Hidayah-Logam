@@ -489,7 +489,7 @@ export const TeacherDataView: React.FC<TeacherDataViewProps> = ({ teachers, setT
                       </div>
                       <div>
                         <div className="font-extrabold text-slate-100 text-sm">{teacher.name}</div>
-                        {teacher.nip && <div className="text-[10px] text-slate-400 font-mono">NIP: {teacher.nip}</div>}
+                        {teacher.nip && <div className="text-[10px] text-slate-400 font-mono">NIS / ID: {teacher.nip}</div>}
                       </div>
                     </div>
                   </td>

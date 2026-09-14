@@ -281,7 +281,6 @@ export const DEFAULT_ROLE_PERMISSIONS: RolePermissions = {
     'ai-pembuat-game',
     'riwayat-game',
     'ekstrak-dokumen',
-    'upload-soal',
     'bank-soal',
     'kumpulan-jawaban',
     'mulai-ujian',

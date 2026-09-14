@@ -16,7 +16,6 @@ import {
   Gamepad2,
   FileText,
   ListOrdered,
-  UploadCloud,
   Database,
   Key,
   PlayCircle,
@@ -74,7 +73,7 @@ const MENU_LIST: MenuDefinition[] = [
     id: 'data-guru',
     label: 'Data Guru & Tenaga Pendidik',
     category: 'Master Data Pokok',
-    description: 'Manajemen data guru, NIP, mapel diampu, serta ekspor-impor Excel',
+    description: 'Manajemen data guru, NUPTK/NIK, mapel diampu, serta ekspor-impor Excel',
     icon: Users,
   },
   {
@@ -133,13 +132,6 @@ const MENU_LIST: MenuDefinition[] = [
     icon: FileText,
     badge: 'New',
     badgeColor: 'bg-emerald-500/30 text-emerald-200 border-emerald-500/40',
-  },
-  {
-    id: 'upload-soal',
-    label: 'Upload Soal dari Excel',
-    category: 'Manajemen Bank Soal',
-    description: 'Import massal bank soal dari file Excel template standar CBT',
-    icon: UploadCloud,
   },
   {
     id: 'bank-soal',
@@ -249,7 +241,6 @@ export const HakAksesView: React.FC<HakAksesViewProps> = ({
       'ai-pembuat-game',
       'riwayat-game',
       'ekstrak-dokumen',
-      'upload-soal',
       'bank-soal',
       'kumpulan-jawaban',
       'mulai-ujian',

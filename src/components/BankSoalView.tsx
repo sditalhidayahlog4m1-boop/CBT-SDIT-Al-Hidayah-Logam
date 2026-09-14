@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Database, Search, Eye, Edit2, Edit3, Trash2, Key, Download, BookOpen, Layers, Plus, FileEdit, Copy, Check, Sparkles, RefreshCw } from 'lucide-react';
+import { Database, Search, Eye, Edit2, Edit3, Trash2, Key, Download, BookOpen, Layers, Plus, FileEdit, Copy, Check, Sparkles, RefreshCw, Shuffle, HelpCircle } from 'lucide-react';
 import { QuestionBank, ActiveTab, Subject } from '../types';
 import { normalizeQuestion } from '../utils/normalizeQuestion';
 import { exportBankToExcel } from '../utils/exportImport';
@@ -34,6 +34,8 @@ export const BankSoalView: React.FC<BankSoalViewProps> = ({ banks, setBanks, set
   const [editingBank, setEditingBank] = useState<QuestionBank | null>(null);
   const [editingQuestionIndex, setEditingQuestionIndex] = useState<number>(0);
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
+  const [isShuffleModalOpen, setIsShuffleModalOpen] = useState<boolean>(false);
+  const [shuffleTargetScope, setShuffleTargetScope] = useState<'ALL' | string>('ALL');
 
   // Synchronize with master subjects from Menu Mata Pelajaran
   const registeredSubjects = (subjects && subjects.length > 0) ? subjects : getStoredSubjects();
@@ -51,6 +53,14 @@ export const BankSoalView: React.FC<BankSoalViewProps> = ({ banks, setBanks, set
     modalId: 'edit-bank-modal',
     isOpen: Boolean(editingBank),
     onClose: () => setEditingBank(null),
+    tab: 'bank-soal',
+  });
+
+  // Synchronize Shuffle Modal with browser history
+  useHistoryModal({
+    modalId: 'shuffle-bank-modal',
+    isOpen: isShuffleModalOpen,
+    onClose: () => setIsShuffleModalOpen(false),
     tab: 'bank-soal',
   });
 
@@ -202,6 +212,120 @@ export const BankSoalView: React.FC<BankSoalViewProps> = ({ banks, setBanks, set
     addToast('success', `Paket soal "${targetTitle}" berhasil dihapus permanen dari Bank Soal.`, 'Berhasil Dihapus');
   };
 
+  // Helper untuk mengacak isi butir soal namun nomor soal tetap terurut rapi (1, 2, 3... N)
+  const shuffleBankQuestions = (bank: QuestionBank): { updatedBank: QuestionBank; total: number } => {
+    if (!bank.questions || bank.questions.length <= 1) {
+      return { updatedBank: bank, total: bank.questions?.length || 0 };
+    }
+
+    // Clone array pertanyaan
+    const shuffled = [...bank.questions];
+    // Algoritma Fisher-Yates untuk mengacak urutan pertanyaan
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+
+    // Beri penomoran berurutan rapi: 1, 2, 3... N
+    const renumbered = shuffled.map((q, idx) => ({
+      ...q,
+      question_number: idx + 1,
+    }));
+
+    return {
+      updatedBank: {
+        ...bank,
+        questions: renumbered,
+        updatedAt: new Date().toISOString(),
+      },
+      total: renumbered.length,
+    };
+  };
+
+  // Handler eksekusi acak urutan soal (bisa semua mapel atau mapel tertentu)
+  const handleExecuteBulkShuffle = (scope: 'ALL' | string) => {
+    let targetBankCount = 0;
+    let totalQuestionsShuffled = 0;
+
+    const updated = banks.map((bank) => {
+      if (!bank || !bank.id || isBankDeletedLocally(bank.id)) return bank;
+
+      const matchesScope =
+        scope === 'ALL' ||
+        (bank.subject || '').trim().toLowerCase() === scope.trim().toLowerCase();
+
+      if (matchesScope && bank.questions && bank.questions.length > 1) {
+        const { updatedBank, total } = shuffleBankQuestions(bank);
+        targetBankCount++;
+        totalQuestionsShuffled += total;
+        return updatedBank;
+      }
+      return bank;
+    });
+
+    if (targetBankCount === 0) {
+      addToast(
+        'info',
+        'Tidak ada paket soal yang memiliki lebih dari 1 butir pertanyaan pada cakupan ini.',
+        'Tidak Ada Soal Diacak'
+      );
+      setIsShuffleModalOpen(false);
+      return;
+    }
+
+    setBanks(updated);
+    saveStoredBanks(updated);
+    broadcastAppDataChange({ banks: updated });
+    saveAppDataToFirestore({ banks: updated });
+
+    if (previewBank) {
+      const updatedPreview = updated.find((b) => b.id === previewBank.id);
+      if (updatedPreview) setPreviewBank(updatedPreview);
+    }
+
+    setIsShuffleModalOpen(false);
+    const scopeDescription =
+      scope === 'ALL' ? 'semua mata pelajaran' : `mata pelajaran "${scope}"`;
+
+    addToast(
+      'success',
+      `Berhasil mengacak urutan butir soal pada ${targetBankCount} paket soal (${scopeDescription})! Pertanyaan telah diacak dan nomor soal tetap berurutan 1, 2, 3...`,
+      'Urutan Soal Berhasil Diacak'
+    );
+  };
+
+  // Handler acak urutan soal untuk paket individual
+  const handleShuffleSingleBank = (bank: QuestionBank, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+
+    if (!bank.questions || bank.questions.length <= 1) {
+      addToast(
+        'warning',
+        `Paket "${bank.title}" hanya memiliki ${bank.questions?.length || 0} butir soal, tidak dapat diacak.`,
+        'Soal Terlalu Sedikit'
+      );
+      return;
+    }
+
+    const { updatedBank, total } = shuffleBankQuestions(bank);
+    const updated = banks.map((b) => (b.id === bank.id ? updatedBank : b));
+
+    setBanks(updated);
+    saveStoredBanks(updated);
+    broadcastAppDataChange({ banks: updated });
+    saveAppDataToFirestore({ banks: updated });
+
+    if (previewBank?.id === bank.id) {
+      setPreviewBank(updatedBank);
+    }
+
+    addToast(
+      'success',
+      `Pertanyaan pada paket "${bank.title}" (${total} butir) berhasil diacak! Nomor soal tetap berurutan 1 sampai ${total}.`,
+      'Urutan Soal Diacak'
+    );
+  };
+
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
       {/* Top Header & Search Controls */}
@@ -245,8 +369,21 @@ export const BankSoalView: React.FC<BankSoalViewProps> = ({ banks, setBanks, set
           )}
 
           <button
-            onClick={() => setActiveTab('pembuat-soal-ai')}
-            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-md shadow-indigo-600/20 transition-colors shrink-0"
+            onClick={() => {
+              setShuffleTargetScope(selectedSubjectFilter);
+              setIsShuffleModalOpen(true);
+            }}
+            className="px-3.5 py-2 bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 border border-purple-500/40 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all shadow-xs shrink-0 cursor-pointer"
+            title="Acak urutan butir soal (pertanyaan diacak, nomor soal tetap berurutan 1, 2, 3...)"
+          >
+            <Shuffle className="w-4 h-4 text-purple-400" />
+            <span>Acak Urutan Soal</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('ekstrak-dokumen')}
+            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-md shadow-indigo-600/20 transition-colors shrink-0 cursor-pointer"
+            title="Tambah Paket Soal via Ekstrak Dokumen"
           >
             <Plus className="w-4 h-4" />
             <span>Tambah Paket Soal</span>
@@ -339,8 +476,8 @@ export const BankSoalView: React.FC<BankSoalViewProps> = ({ banks, setBanks, set
                 </div>
               </div>
 
-              {/* Actions (4-Action Grid: Detail, Edit, Excel, Hapus) */}
-              <div className="grid grid-cols-4 gap-1.5 pt-3 border-t border-slate-800 text-xs">
+              {/* Actions (5-Action Grid: Detail, Edit, Acak, Excel, Hapus) */}
+              <div className="grid grid-cols-5 gap-1 pt-3 border-t border-slate-800 text-xs">
                 <button
                   onClick={() => setPreviewBank(bank)}
                   className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg font-semibold flex items-center justify-center gap-1 cursor-pointer transition-colors"
@@ -356,7 +493,16 @@ export const BankSoalView: React.FC<BankSoalViewProps> = ({ banks, setBanks, set
                   title="Edit Judul, Soal, & Pilihan Ganda"
                 >
                   <Edit2 className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Edit</span>
+                  <span className="hidden sm:inline">Edit</span>
+                </button>
+
+                <button
+                  onClick={(e) => handleShuffleSingleBank(bank, e)}
+                  className="p-2 bg-purple-500/15 hover:bg-purple-500/25 text-purple-300 border border-purple-500/30 rounded-lg font-bold flex items-center justify-center gap-1 cursor-pointer transition-colors shadow-xs"
+                  title="Acak urutan butir soal (pertanyaan diacak, nomor soal tetap berurutan 1, 2, 3...)"
+                >
+                  <Shuffle className="w-3.5 h-3.5 text-purple-400" />
+                  <span className="hidden sm:inline">Acak</span>
                 </button>
 
                 <button
@@ -382,8 +528,19 @@ export const BankSoalView: React.FC<BankSoalViewProps> = ({ banks, setBanks, set
         })}
 
         {filtered.length === 0 && (
-          <div className="col-span-full bg-[#0f172a] rounded-2xl p-12 text-center text-slate-500 border border-slate-800">
-            Tidak ditemukan paket soal di Bank Soal.
+          <div className="col-span-full bg-[#0f172a] rounded-2xl p-12 text-center text-slate-500 border border-slate-800 space-y-4">
+            <Database className="w-12 h-12 text-slate-600 mx-auto" />
+            <div>
+              <p className="text-sm font-semibold text-slate-300">Tidak ditemukan paket soal di Bank Soal.</p>
+              <p className="text-xs text-slate-500 mt-1">Gunakan fitur Ekstrak Dokumen untuk membuat dan mengimpor paket soal CBT baru.</p>
+            </div>
+            <button
+              onClick={() => setActiveTab('ekstrak-dokumen')}
+              className="inline-flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-indigo-600/20 transition-colors cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Tambah Paket Soal via Ekstrak Dokumen</span>
+            </button>
           </div>
         )}
       </div>
@@ -411,6 +568,15 @@ export const BankSoalView: React.FC<BankSoalViewProps> = ({ banks, setBanks, set
                 </p>
               </div>
               <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handleShuffleSingleBank(previewBank)}
+                  className="px-3 py-1.5 bg-purple-500/15 hover:bg-purple-500/25 text-purple-300 border border-purple-500/30 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+                  title="Acak urutan butir soal pada paket ini (nomor soal tetap berurutan 1, 2, 3...)"
+                >
+                  <Shuffle className="w-3.5 h-3.5 text-purple-400" />
+                  <span>Acak Soal</span>
+                </button>
+
                 <button
                   onClick={() => {
                     handleEditBank(previewBank, 0);
@@ -525,6 +691,125 @@ export const BankSoalView: React.FC<BankSoalViewProps> = ({ banks, setBanks, set
         onClose={() => setEditingBank(null)}
         onSave={handleSaveEditedBank}
       />
+
+      {/* Modal Acak Urutan Soal (Bisa Semua Mapel / Mapel Tertentu) */}
+      {isShuffleModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xs animate-fade-in">
+          <div className="bg-[#0f172a] rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-800 space-y-5">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2.5 rounded-xl bg-purple-500/20 text-purple-400 border border-purple-500/30">
+                  <Shuffle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-slate-100 text-base">Acak Urutan Soal</h3>
+                  <p className="text-xs text-slate-400">Pengacakan pertanyaan dalam paket bank soal</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsShuffleModalOpen(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-3.5 bg-purple-950/30 border border-purple-800/40 rounded-xl space-y-1.5 text-xs text-purple-200">
+              <div className="font-bold flex items-center gap-1.5 text-purple-300">
+                <HelpCircle className="w-4 h-4 text-purple-400" />
+                <span>Aturan & Mekanisme Pengacakan:</span>
+              </div>
+              <ul className="list-disc list-inside space-y-1 text-slate-300 pl-1 text-[11px] leading-relaxed">
+                <li>Yang diacak adalah <strong>isi butir pertanyaan beserta pilihan gandanya</strong>.</li>
+                <li><strong>Nomor soal tetap tersusun rapi berurutan</strong> (Nomor 1, 2, 3, dst.) tanpa merusak urutan CBT.</li>
+                <li>Hasil pengacakan langsung tersimpan permanen dan otomatis sinkron ke server.</li>
+              </ul>
+            </div>
+
+            <div className="space-y-3">
+              <label className="block text-xs font-bold text-slate-200">Pilih Cakupan Mata Pelajaran:</label>
+              <div className="space-y-2">
+                <label className="flex items-center gap-3 p-3 rounded-xl border border-slate-800 bg-slate-900/60 hover:bg-slate-900 cursor-pointer transition-colors">
+                  <input
+                    type="radio"
+                    name="shuffleScope"
+                    value="ALL"
+                    checked={shuffleTargetScope === 'ALL'}
+                    onChange={() => setShuffleTargetScope('ALL')}
+                    className="accent-purple-500 w-4 h-4 cursor-pointer"
+                  />
+                  <div className="flex-1 text-xs">
+                    <div className="font-bold text-slate-200 flex items-center justify-between">
+                      <span>Semua Mata Pelajaran</span>
+                      <span className="text-[11px] font-mono text-purple-400 font-bold bg-purple-500/10 px-2 py-0.5 rounded border border-purple-500/20">
+                        {banks.length} Paket Soal
+                      </span>
+                    </div>
+                    <p className="text-slate-400 text-[11px] mt-0.5">
+                      Mengacak pertanyaan di seluruh paket soal pada semua mata pelajaran sekaligus.
+                    </p>
+                  </div>
+                </label>
+
+                <label className="flex items-start gap-3 p-3 rounded-xl border border-slate-800 bg-slate-900/60 hover:bg-slate-900 cursor-pointer transition-colors">
+                  <input
+                    type="radio"
+                    name="shuffleScope"
+                    value="SPECIFIC"
+                    checked={shuffleTargetScope !== 'ALL'}
+                    onChange={() => {
+                      const firstSubj = uniqueSubjects[0] || '';
+                      setShuffleTargetScope(selectedSubjectFilter !== 'ALL' ? selectedSubjectFilter : firstSubj);
+                    }}
+                    className="accent-purple-500 w-4 h-4 mt-0.5 cursor-pointer"
+                  />
+                  <div className="flex-1 space-y-2 text-xs">
+                    <div className="font-bold text-slate-200">
+                      Pilih Satu Mata Pelajaran Tertentu:
+                    </div>
+                    {shuffleTargetScope !== 'ALL' && (
+                      <select
+                        value={shuffleTargetScope}
+                        onChange={(e) => setShuffleTargetScope(e.target.value)}
+                        className="w-full px-3 py-2 bg-slate-950 border border-purple-500/50 rounded-lg text-xs text-purple-200 focus:outline-none focus:ring-1 focus:ring-purple-400 cursor-pointer"
+                      >
+                        {uniqueSubjects.map((subj) => {
+                          const countInSubj = banks.filter(
+                            (b) => (b.subject || '').trim().toLowerCase() === subj.trim().toLowerCase()
+                          ).length;
+                          return (
+                            <option key={subj} value={subj}>
+                              {subj} ({countInSubj} Paket Soal)
+                            </option>
+                          );
+                        })}
+                      </select>
+                    )}
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setIsShuffleModalOpen(false)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-xs cursor-pointer transition-colors"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={() => handleExecuteBulkShuffle(shuffleTargetScope)}
+                className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-lg shadow-purple-600/30 transition-all cursor-pointer"
+              >
+                <Shuffle className="w-4 h-4" />
+                <span>Mulai Acak Urutan Soal</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Confirmation Modal */}
       <ConfirmModal

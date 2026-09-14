@@ -21,7 +21,7 @@ const TAB_TITLES: Record<ActiveTab, { title: string; subtitle: string }> = {
   },
   'profil-saya': {
     title: 'Profil Saya',
-    subtitle: 'Kelola informasi nama, username, kata sandi, dan foto profil akun Anda',
+    subtitle: 'Biodata lengkap siswa & pengelolaan foto profil akun pengguna',
   },
   'profil-sekolah': {
     title: 'Profil Sekolah',
@@ -54,10 +54,6 @@ const TAB_TITLES: Record<ActiveTab, { title: string; subtitle: string }> = {
   'ekstrak-dokumen': {
     title: 'Ekstrak Dokumen Soal',
     subtitle: 'Ekstrak soal dari teks dokumen ke format CBT',
-  },
-  'upload-soal': {
-    title: 'Upload Soal dari Excel',
-    subtitle: 'Impor bank soal beserta kunci jawaban menggunakan template Excel',
   },
   'bank-soal': {
     title: 'Bank Soal Permanen',
@@ -238,9 +234,15 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* User Login & Info Badge */}
         <button
-          onClick={onOpenLoginModal}
+          onClick={() => {
+            if (currentUser) {
+              setActiveTab('profil-saya');
+            } else {
+              onOpenLoginModal();
+            }
+          }}
           className="flex items-center gap-2 pl-1.5 sm:pl-3 border-l border-slate-800 hover:opacity-90 transition-all cursor-pointer group"
-          title="Klik untuk Portal Log In / Ganti Akun Guru & Siswa"
+          title={currentUser ? `Buka Profil Saya (${currentUser.name})` : "Klik untuk Portal Log In / Masuk Akun"}
         >
           <div
             className={`w-8 h-8 sm:w-9 sm:h-9 rounded-xl border flex items-center justify-center shrink-0 shadow-md transition-all overflow-hidden ${

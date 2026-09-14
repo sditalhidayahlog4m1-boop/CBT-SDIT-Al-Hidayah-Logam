@@ -57,7 +57,6 @@ import { NilaiHarianView } from './components/NilaiHarianView';
 import { AiQuestionGeneratorView } from './components/AiQuestionGeneratorView';
 import { AiGameGeneratorView } from './components/AiGameGeneratorView';
 import { EkstrakDokumenView } from './components/EkstrakDokumenView';
-import { UploadSoalView } from './components/UploadSoalView';
 import { BankSoalView } from './components/BankSoalView';
 import { KumpulanJawabanView } from './components/KumpulanJawabanView';
 import { MulaiUjianView } from './components/MulaiUjianView';
@@ -86,7 +85,7 @@ import {
 import { subscribeToLocalSync, broadcastAppDataChange } from './utils/syncEngine';
 import { isDeepEqual } from './utils/deepEqual';
 import { autoSyncBanksWithSubjects } from './utils/subjectMatcher';
-import { authenticateUser, cleanAlphanumeric } from './utils/authMatcher';
+import { authenticateUser, cleanAlphanumeric, normalizeString } from './utils/authMatcher';
 import {
   getCurrentHistoryState,
   pushNavigationState,
@@ -485,20 +484,32 @@ export default function App() {
       const inputPassword = typeof passwordOrRememberMe === 'string' ? passwordOrRememberMe.trim() : '';
       shouldRemember = typeof rememberMe === 'boolean' ? rememberMe : true;
 
-      // 1. Cek Akun Admin
+      // 1. Cek Akun Admin (fleksibel: huruf besar semua, kecil semua, maupun huruf awal besar)
       const storedAdmin = getStoredAdminAccount();
-      const adminUserClean = storedAdmin.username.trim().toLowerCase();
+      const adminUserNorm = normalizeString(storedAdmin.username);
+      const adminUserClean = cleanAlphanumeric(storedAdmin.username);
+      const adminNameNorm = normalizeString(storedAdmin.name);
+      const adminNameClean = cleanAlphanumeric(storedAdmin.name);
       const adminPassClean = storedAdmin.password.trim();
-      const cleanUserNorm = inputUsername.toLowerCase();
+
+      const userNorm = normalizeString(inputUsername);
+      const userClean = cleanAlphanumeric(inputUsername);
 
       const isAdminMatch =
-        cleanUserNorm === adminUserClean ||
-        cleanUserNorm === 'admin' ||
-        cleanAlphanumeric(inputUsername) === 'admin';
+        userNorm === 'admin' ||
+        userNorm === 'administrator' ||
+        userNorm === adminUserNorm ||
+        userNorm === adminNameNorm ||
+        userClean === 'admin' ||
+        userClean === 'administrator' ||
+        userClean === adminUserClean ||
+        userClean === adminNameClean ||
+        (userClean.startsWith('admin') && userClean.length <= 13);
 
       const isPassAdminMatch =
         inputPassword === adminPassClean ||
         inputPassword.toLowerCase() === adminPassClean.toLowerCase() ||
+        cleanAlphanumeric(inputPassword) === cleanAlphanumeric(adminPassClean) ||
         (adminPassClean.toLowerCase() === 'admin' &&
           (inputPassword.toLowerCase() === 'admin' ||
             inputPassword.toLowerCase() === 'admin123' ||
@@ -1306,17 +1317,6 @@ export default function App() {
 
           {activeTab === 'ekstrak-dokumen' && (
             <EkstrakDokumenView
-              onSaveBank={handleSaveBank}
-              setActiveTab={handleNavigateTab}
-              teachers={teachers}
-              subjects={subjects}
-              students={students}
-              banks={banks}
-            />
-          )}
-
-          {activeTab === 'upload-soal' && (
-            <UploadSoalView
               onSaveBank={handleSaveBank}
               setActiveTab={handleNavigateTab}
               teachers={teachers}

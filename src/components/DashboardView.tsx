@@ -372,7 +372,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   }, [filteredUsers, currentPage]);
 
   const handleExportCSV = () => {
-    const headers = ['Nama', 'Peran', 'NISN/NIP/Username', 'Kelas/Mata Pelajaran', 'Status Login', 'Waktu Login Terakhir', 'Jumlah Ujian Selesai'];
+    const headers = ['Nama', 'Peran', 'NIS/NISN/Username', 'Kelas/Mata Pelajaran', 'Status Login', 'Waktu Login Terakhir', 'Jumlah Ujian Selesai'];
     const rows = filteredUsers.map((u) => [
       `"${u.name.replace(/"/g, '""')}"`,
       `"${u.role.toUpperCase()}"`,
@@ -694,7 +694,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 setSearchQuery(e.target.value);
                 setCurrentPage(1);
               }}
-              placeholder="Cari nama, NISN, NIP, kelas..."
+              placeholder="Cari nama, NIS, NISN, kelas..."
               className="w-full pl-9 pr-4 py-2 bg-slate-900/90 border border-slate-800 rounded-xl text-xs text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
             />
           </div>
@@ -707,7 +707,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <tr>
                 <th className="p-3.5 pl-5">Nama Pengguna</th>
                 <th className="p-3.5">Peran / Role</th>
-                <th className="p-3.5">NISN / NIP / ID</th>
+                <th className="p-3.5">NIS / NISN / ID</th>
                 <th className="p-3.5">Kelas / Jabatan</th>
                 <th className="p-3.5 text-center">Status Login</th>
                 <th className="p-3.5 text-center">Waktu Login Terakhir</th>

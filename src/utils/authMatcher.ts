@@ -54,30 +54,43 @@ const TITLES_REGEX =
 
 /**
  * Normalize a name or username string:
- * - Lowercase
- * - Trim
- * - Collapse multiple whitespace
+ * - Removes zero-width characters and converts non-breaking spaces
+ * - Lowercase (HURUF BESAR SEMUA, kecil semua, maupun Huruf Awal Besar semuanya dinormalisasi)
+ * - Trim leading/trailing whitespace
+ * - Collapse multiple spaces into single space
  */
 export function normalizeString(str?: string | null): string {
   if (!str) return '';
-  return str.toLowerCase().trim().replace(/\s+/g, ' ');
+  return str
+    .replace(/[\u200B-\u200D\uFEFF]/g, '') // remove zero-width characters
+    .replace(/\u00A0/g, ' ') // non-breaking space to regular space
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, ' ');
 }
 
 /**
  * Strip all non-alphanumeric characters for loose slug matching
+ * (e.g. "Ahmad Fauzi", "AHMAD FAUZI", "ahmad.fauzi", "Ahmad-Fauzi" -> "ahmadfauzi")
  */
 export function cleanAlphanumeric(str?: string | null): string {
   if (!str) return '';
-  return str.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return str
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
 }
 
 /**
- * Remove titles/honorifics from names
+ * Remove titles/honorifics and special characters from names for clean matching
  */
 export function stripTitles(name: string): string {
-  const withoutTitles = name.replace(TITLES_REGEX, '').replace(/[.,]/g, ' ');
+  const withoutTitles = name
+    .replace(TITLES_REGEX, ' ')
+    .replace(/['"`’‘`\-()[\]{}_.,/\\+:]/g, ' ');
   return normalizeString(withoutTitles);
 }
+
 
 /**
  * Parsed date representation
@@ -297,16 +310,18 @@ export function getAccountNameMatchScore(
     const idClean = cleanAlphanumeric(id);
     if (input === idNorm) return 100;
     if (inputClean === idClean) return 98;
+    // Match username with dots/dashes against spaced input (e.g. "ahmad.fauzi" vs "Ahmad Fauzi")
+    if (normalizeString(id.replace(/[._\-]/g, ' ')) === input) return 98;
   }
 
   // 2. Match on Full Name
   const targetName = normalizeString(account.name);
   const targetClean = cleanAlphanumeric(account.name);
 
-  // Exact full name match (case-insensitive & trimmed)
+  // Exact full name match (case-insensitive & trimmed, ignores UPPER/lower/TitleCase)
   if (input === targetName) return 95;
 
-  // Full name alphanumeric slug match
+  // Full name alphanumeric slug match (ignores all spaces, punctuation, case)
   if (inputClean === targetClean) return 92;
 
   // 3. Match without academic titles / honorifics (e.g. "Drs. Ahmad, M.Pd" -> "ahmad")
@@ -318,12 +333,12 @@ export function getAccountNameMatchScore(
   if (inputNoTitles === targetNoTitles) return 90;
   if (inputNoTitlesClean === targetNoTitlesClean) return 88;
 
-  // 4. Word-level matching
+  // 4. Word-level matching (bisa huruf besar semua, kecil semua, maupun huruf awal besar)
   const inputWords = inputNoTitles.split(/\s+/).filter((w) => w.length >= 2);
   const targetWords = targetNoTitles.split(/\s+/).filter((w) => w.length >= 2);
 
   if (inputWords.length > 0 && targetWords.length > 0) {
-    // Check if input is a subset of target's words (e.g. "Ahmad Dahlan" in "Ahmad Dahlan Subarjo")
+    // Check if input words are an exact subset of target's words (e.g. "Ahmad Fauzi" in "Muhammad Ahmad Fauzi")
     const allInputInTarget = inputWords.every((iw) =>
       targetWords.some((tw) => tw === iw || tw.startsWith(iw) || iw.startsWith(tw))
     );
@@ -331,9 +346,28 @@ export function getAccountNameMatchScore(
       return 85;
     }
 
-    // Check if first name matches (call name / nama panggilan)
-    if (inputWords[0] === targetWords[0] && inputWords[0].length >= 3) {
-      return 75;
+    // Check if target words are a subset of input words (e.g. user typed extra middle/last name)
+    const allTargetInInput = targetWords.every((tw) =>
+      inputWords.some((iw) => iw === tw || iw.startsWith(tw) || tw.startsWith(iw))
+    );
+    if (allTargetInInput) {
+      return 85;
+    }
+
+    // Check if at least 2 words match
+    const matchingWordsCount = inputWords.filter((iw) =>
+      targetWords.some((tw) => tw === iw || tw.startsWith(iw) || iw.startsWith(tw))
+    ).length;
+    if (matchingWordsCount >= 2) {
+      return 80;
+    }
+
+    // Check if any single significant word matches (call name / nama panggilan)
+    if (inputWords.length === 1 && inputWords[0].length >= 3) {
+      const singleWord = inputWords[0];
+      if (targetWords.some((tw) => tw === singleWord)) {
+        return 75;
+      }
     }
   }
 

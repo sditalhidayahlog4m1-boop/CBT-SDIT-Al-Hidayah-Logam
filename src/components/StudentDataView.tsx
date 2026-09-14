@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Plus, Edit2, Trash2, Download, Upload, Search, GraduationCap, Phone, MapPin, Calendar, Users, CheckCircle2, XCircle, Clock } from 'lucide-react';
+import { Plus, Edit2, Trash2, Download, Upload, Search, GraduationCap, Phone, MapPin, Calendar, Users, CheckCircle2, XCircle, Clock, KeyRound } from 'lucide-react';
 import { Student, UserLoginLog } from '../types';
 import { downloadSiswaTemplate } from '../utils/exportImport';
 import * as XLSX from 'xlsx';
@@ -84,6 +84,8 @@ export const StudentDataView: React.FC<StudentDataViewProps> = ({ students, setS
     academicYear: '2024/2025',
     activeStatus: 'Aktif',
     active: true,
+    username: '',
+    password: '',
   });
 
   // Extract unique classes for filter
@@ -126,6 +128,8 @@ export const StudentDataView: React.FC<StudentDataViewProps> = ({ students, setS
       academicYear: '2024/2025',
       activeStatus: 'Aktif',
       active: true,
+      username: '',
+      password: '',
     });
     setIsModalOpen(true);
   };
@@ -148,6 +152,8 @@ export const StudentDataView: React.FC<StudentDataViewProps> = ({ students, setS
       academicYear: student.academicYear || '2024/2025',
       activeStatus: student.activeStatus || 'Aktif',
       active: student.activeStatus !== 'Non-Aktif',
+      username: student.username || '',
+      password: student.password || '',
     });
     setIsModalOpen(true);
   };
@@ -895,6 +901,43 @@ export const StudentDataView: React.FC<StudentDataViewProps> = ({ students, setS
                     <option value="Lulus">Lulus</option>
                   </select>
                 </div>
+              </div>
+
+              {/* Row 8: Username & Password Siswa (Kredensial Login Khusus Admin) */}
+              <div className="p-3.5 bg-slate-950/80 border border-amber-500/30 rounded-2xl space-y-2.5">
+                <div className="flex items-center gap-1.5 text-xs font-black text-amber-400">
+                  <KeyRound className="w-3.5 h-3.5" />
+                  <span>KREDENSIAL LOGIN SISWA (USER & PASS KHUSUS ADMINISTRATOR)</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                      USERNAME SISWA
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Default: NIS atau nama siswa"
+                      value={formData.username || ''}
+                      onChange={(e) => setFormData({ ...formData, username: e.target.value })}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 focus:ring-2 focus:ring-amber-400 focus:outline-none font-mono text-xs"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                      PASSWORD / KATA SANDI
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Default: Tanggal Lahir (DD/MM/YYYY)"
+                      value={formData.password || ''}
+                      onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 focus:ring-2 focus:ring-amber-400 focus:outline-none font-mono text-xs"
+                    />
+                  </div>
+                </div>
+                <p className="text-[10px] text-slate-400">
+                  Catatan: Siswa hanya dapat melihat biodata resmi tanpa bisa merubahnya. Pengaturan user & pass hanya dapat dilakukan oleh Administrator.
+                </p>
               </div>
 
               {/* Action Buttons */}

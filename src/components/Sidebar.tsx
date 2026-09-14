@@ -7,7 +7,6 @@ import {
   BookOpen,
   Sparkles,
   ListOrdered,
-  UploadCloud,
   FileText,
   Database,
   Key,
@@ -57,6 +56,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const allMenuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { id: 'profil-saya', label: 'Profil Saya', icon: User },
     { id: 'profil-sekolah', label: 'Profil Sekolah', icon: School },
     { id: 'data-guru', label: 'Data Guru', icon: Users },
     { id: 'data-siswa', label: 'Data Siswa', icon: GraduationCap },
@@ -66,7 +66,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'riwayat-game', label: 'Rekap Game Siswa', icon: Trophy },
     { id: 'pembuat-soal-ai', label: 'Pembuat Soal', icon: Sparkles, highlight: true },
     { id: 'ekstrak-dokumen', label: 'Ekstrak Dokumen', icon: FileText, digitalForm: true },
-    { id: 'upload-soal', label: 'Upload Soal', icon: UploadCloud },
     { id: 'bank-soal', label: 'Bank Soal', icon: Database },
     { id: 'kumpulan-jawaban', label: 'Kumpulan Jawaban', icon: Key },
     { id: 'mulai-ujian', label: 'Mulai Ujian', icon: PlayCircle, student: true },

@@ -109,20 +109,32 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       return;
     }
 
-    // 1. Deteksi Akun Admin (fleksibel huruf besar/kecil)
+    // 1. Deteksi Akun Admin (fleksibel: huruf besar semua, kecil semua, maupun huruf awal besar)
     const storedAdmin = getStoredAdminAccount();
-    const adminUserClean = storedAdmin.username.trim().toLowerCase();
+    const adminUserNorm = normalizeString(storedAdmin.username);
+    const adminUserClean = cleanAlphanumeric(storedAdmin.username);
+    const adminNameNorm = normalizeString(storedAdmin.name);
+    const adminNameClean = cleanAlphanumeric(storedAdmin.name);
     const adminPassClean = storedAdmin.password.trim();
-    const cleanUserNorm = cleanUsername.toLowerCase();
+
+    const userNorm = normalizeString(cleanUsername);
+    const userClean = cleanAlphanumeric(cleanUsername);
 
     const isUsernameAdmin =
-      cleanUserNorm === adminUserClean ||
-      cleanUserNorm === 'admin' ||
-      cleanAlphanumeric(cleanUsername) === 'admin';
+      userNorm === 'admin' ||
+      userNorm === 'administrator' ||
+      userNorm === adminUserNorm ||
+      userNorm === adminNameNorm ||
+      userClean === 'admin' ||
+      userClean === 'administrator' ||
+      userClean === adminUserClean ||
+      userClean === adminNameClean ||
+      (userClean.startsWith('admin') && userClean.length <= 13);
 
     const isPasswordAdmin =
       cleanPass === adminPassClean ||
       cleanPass.toLowerCase() === adminPassClean.toLowerCase() ||
+      cleanAlphanumeric(cleanPass) === cleanAlphanumeric(adminPassClean) ||
       (adminPassClean.toLowerCase() === 'admin' &&
         (cleanPass.toLowerCase() === 'admin' ||
           cleanPass.toLowerCase() === 'admin123' ||
@@ -174,7 +186,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
 
     // Jika tidak ditemukan di database manapun
     setErrorMessage(
-      `Akun "${cleanUsername}" tidak ditemukan. Pastikan Nama Lengkap (huruf besar/kecil bebas), Username, NIP, atau NISN sudah terdaftar di sistem.`
+      `Akun "${cleanUsername}" tidak ditemukan. Pastikan Nama Lengkap (huruf besar/kecil bebas), Username, NIS, atau NISN sudah terdaftar di sistem.`
     );
   };
 
@@ -404,7 +416,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                   )}
                   {'nip' in currentUser.details && currentUser.details.nip && (
                     <div className="bg-slate-950/50 p-2.5 rounded-xl border border-slate-800">
-                      <span className="text-slate-400 block text-[10px] font-medium">NIP Guru</span>
+                      <span className="text-slate-400 block text-[10px] font-medium">NIS / ID Guru</span>
                       <span className="font-mono font-bold text-slate-200">{currentUser.details.nip}</span>
                     </div>
                   )}
@@ -577,7 +589,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                     <span>Username / Nama Lengkap</span>
                   </span>
                   <span className="text-[10px] text-amber-300 font-mono font-semibold bg-amber-400/10 px-2 py-0.5 rounded-md border border-amber-400/20">
-                    Huruf besar/kecil bebas
+                    Besar / Kecil Bebas
                   </span>
                 </label>
                 <div className="relative">
@@ -586,13 +598,14 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                     type="text"
                     value={usernameInput}
                     onChange={(e) => setUsernameInput(e.target.value)}
-                    placeholder="Masukkan nama lengkap, username, NIP, atau NISN"
+                    placeholder="Masukkan nama lengkap, username, NIS, atau NISN"
                     className="w-full pl-10 pr-4 py-3 bg-slate-900/90 border border-slate-700 text-slate-100 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-amber-400 transition-all font-semibold placeholder:text-slate-500"
                     required
                   />
                 </div>
-                <p className="text-[10px] text-slate-400 mt-1">
-                  💡 Awalan huruf besar maupun kecil tetap otomatis terdeteksi oleh sistem.
+                <p className="text-[10px] text-amber-300/80 mt-1 flex items-center gap-1">
+                  <span>💡</span>
+                  <span>Bisa <strong>HURUF BESAR SEMUA</strong>, <strong>kecil semua</strong>, atau <strong>Huruf Awal Kata Besar</strong> — langsung terbaca otomatis.</span>
                 </p>
               </div>
 

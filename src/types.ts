@@ -166,7 +166,6 @@ export type ActiveTab =
   | 'ekstrak-dokumen'
   | 'ai-pembuat-game'
   | 'riwayat-game'
-  | 'upload-soal'
   | 'bank-soal'
   | 'kumpulan-jawaban'
   | 'mulai-ujian'
