@@ -113,6 +113,8 @@ export interface ExamResult {
   passed: boolean;
   answers: { [questionIndex: number]: string }; // e.g. { 0: 'B', 1: 'A' }
   bankId: string;
+  studentId?: string;
+  userId?: string;
 }
 
 export interface GameHistoryLog {

@@ -19,7 +19,7 @@ interface MulaiUjianViewProps {
   students: Student[];
   subjects?: Subject[];
   currentUser?: AuthUser | null;
-  onStartExam: (studentName: string, classRoom: string, bank: QuestionBank) => void;
+  onStartExam: (studentName: string, classRoom: string, bank: QuestionBank, studentId?: string) => void;
 }
 
 export const MulaiUjianView: React.FC<MulaiUjianViewProps> = ({
@@ -139,7 +139,15 @@ export const MulaiUjianView: React.FC<MulaiUjianViewProps> = ({
     }
 
     // Valid -> Start Exam with automatically shuffled questions & choices!
-    onStartExam(studentName, classRoom, shuffleQuestionBank(matchedBank));
+    const matchedStudent = students.find(
+      (s) => s.name.trim().toLowerCase() === studentName.trim().toLowerCase() && s.classRoom === classRoom
+    );
+    const resolvedStudentId =
+      currentUser?.role === 'siswa'
+        ? (currentUser.details?.id || (currentUser as any)?.studentId || currentUser.id || matchedStudent?.id || currentUser.username)
+        : (matchedStudent?.id || undefined);
+
+    onStartExam(studentName, classRoom, shuffleQuestionBank(matchedBank), resolvedStudentId);
   };
 
   const getRoleBadge = () => {

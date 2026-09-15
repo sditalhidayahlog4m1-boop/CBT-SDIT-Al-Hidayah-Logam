@@ -24,6 +24,7 @@ interface ExamScreenProps {
   studentName: string;
   classRoom: string;
   bank: QuestionBank;
+  studentId?: string;
   onFinishExam: (result: ExamResult) => void;
   onExitExam: () => void;
 }
@@ -32,6 +33,7 @@ export const ExamScreen: React.FC<ExamScreenProps> = ({
   studentName,
   classRoom,
   bank,
+  studentId,
   onFinishExam,
   onExitExam,
 }) => {
@@ -286,6 +288,8 @@ export const ExamScreen: React.FC<ExamScreenProps> = ({
       passed,
       answers: userAnswers,
       bankId: bank.id,
+      studentId: studentId,
+      userId: studentId,
     };
 
     setFinalResult(result);

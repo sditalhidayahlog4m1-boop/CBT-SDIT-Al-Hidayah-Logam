@@ -1,5 +1,6 @@
 import express from "express";
 import path from "path";
+import fs from "fs";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 
@@ -7,7 +8,10 @@ dotenv.config();
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  // In development container, port 3000 is required by the nginx reverse proxy.
+  // In production (Cloud Run), listen on the port injected by Cloud Run via process.env.PORT (typically 8080).
+  const isDev = process.env.CONTROL_PLANE_PORT !== undefined || process.env.NODE_ENV === "development";
+  const PORT = isDev ? 3000 : (process.env.PORT ? parseInt(process.env.PORT, 10) : 3000);
 
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ extended: true, limit: "50mb" }));
@@ -1228,8 +1232,8 @@ PETUNJUK FORMAT SPESIFIK BERDASARKAN TIPE GAME UNTUK MAPEL UMUM:
     res.json({ status: "ok" });
   });
 
-  // Vite integration
-  if (process.env.NODE_ENV !== "production") {
+  // Vite or static production asset serving
+  if (isDev) {
     const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -1237,15 +1241,44 @@ PETUNJUK FORMAT SPESIFIK BERDASARKAN TIPE GAME UNTUK MAPEL UMUM:
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(process.cwd(), "dist");
+    let distPath = path.join(process.cwd(), "dist");
+    if (!fs.existsSync(path.join(distPath, "index.html"))) {
+      if (fs.existsSync(path.join(process.cwd(), "index.html"))) {
+        distPath = process.cwd();
+      } else if (typeof __dirname !== "undefined" && fs.existsSync(path.join(__dirname, "index.html"))) {
+        distPath = __dirname;
+      }
+    }
     app.use(express.static(distPath));
     app.get("*", (_req, res) => {
       res.sendFile(path.join(distPath, "index.html"));
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  const server = app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server AI CBT running at http://0.0.0.0:${PORT}`);
+  });
+
+  // In production (Cloud Run), if PORT is not 3000, also bind port 3000 as secondary listener if available
+  if (!isDev && PORT !== 3000) {
+    try {
+      const secondaryServer = app.listen(3000, "0.0.0.0", () => {
+        console.log(`Secondary listener active at http://0.0.0.0:3000`);
+      });
+      secondaryServer.on("error", (err) => {
+        console.warn("Secondary port 3000 listener note:", err.message);
+      });
+    } catch {
+      // Ignore if port 3000 cannot be bound
+    }
+  }
+
+  process.on("SIGTERM", () => {
+    console.log("SIGTERM received, closing server gracefully...");
+    server.close(() => {
+      console.log("Server closed.");
+      process.exit(0);
+    });
   });
 }
 

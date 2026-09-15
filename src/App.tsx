@@ -126,6 +126,7 @@ export default function App() {
     studentName: string;
     classRoom: string;
     bank: QuestionBank;
+    studentId?: string;
   } | null>(null);
 
   // Track last synced data from Firestore to prevent unnecessary write loops
@@ -939,14 +940,14 @@ export default function App() {
   }, []);
 
   // Handler when student logs in to start exam with history state
-  const handleStartExam = (studentName: string, classRoom: string, bank: QuestionBank) => {
+  const handleStartExam = (studentName: string, classRoom: string, bank: QuestionBank, studentId?: string) => {
     pushNavigationState({
       tab: 'mulai-ujian',
       modal: 'active-exam',
       drawer: false,
       exam: true,
     });
-    setActiveExam({ studentName, classRoom, bank });
+    setActiveExam({ studentName, classRoom, bank, studentId });
   };
 
   // Handler when exam is completed
@@ -1179,6 +1180,7 @@ export default function App() {
         studentName={activeExam.studentName}
         classRoom={activeExam.classRoom}
         bank={activeExam.bank}
+        studentId={activeExam.studentId}
         onFinishExam={handleFinishExam}
         onExitExam={handleExitExam}
       />
@@ -1348,7 +1350,12 @@ export default function App() {
           )}
 
           {activeTab === 'riwayat-ujian' && (
-            <ExamHistoryView results={results} setResults={setResults} banks={banks} />
+            <ExamHistoryView
+              results={results}
+              setResults={setResults}
+              banks={banks}
+              currentUser={currentUser}
+            />
           )}
 
           {activeTab === 'hak-akses' && (
