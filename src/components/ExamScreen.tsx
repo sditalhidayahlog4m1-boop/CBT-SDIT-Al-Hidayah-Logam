@@ -12,10 +12,13 @@ import {
   ListOrdered,
   X,
   LogOut,
+  PenTool,
+  Type,
 } from 'lucide-react';
 import { QuestionBank, ExamResult } from '../types';
 import { normalizeQuestion } from '../utils/normalizeQuestion';
 import { useHistoryModal } from '../utils/navigationHistory';
+import { AVAILABLE_FONTS, FontOption } from './EkstrakDokumenView';
 
 interface ExamScreenProps {
   studentName: string;
@@ -54,6 +57,13 @@ export const ExamScreen: React.FC<ExamScreenProps> = ({
   const [showExitConfirmModal, setShowExitConfirmModal] = useState(false);
   const [isExamCompleted, setIsExamCompleted] = useState(false);
   const [finalResult, setFinalResult] = useState<ExamResult | null>(null);
+
+  // Resolve bank font and typography
+  const activeFont: FontOption =
+    AVAILABLE_FONTS.find((f) => f.id === bank.fontFamily || f.family === bank.fontFamily) ||
+    AVAILABLE_FONTS.find((f) => f.id === 'jakarta-sans') ||
+    AVAILABLE_FONTS[4];
+  const appliedFontSize = bank.fontSize || '16px';
 
   // Synchronize Mobile Palette drawer with browser history
   useHistoryModal({
@@ -168,6 +178,13 @@ export const ExamScreen: React.FC<ExamScreenProps> = ({
     }));
   };
 
+  const handleAnswerEssay = (text: string) => {
+    setUserAnswers((prev) => ({
+      ...prev,
+      [currentIndex]: text,
+    }));
+  };
+
   const toggleFlagCurrent = () => {
     setFlaggedQuestions((prev) => ({
       ...prev,
@@ -202,7 +219,7 @@ export const ExamScreen: React.FC<ExamScreenProps> = ({
 
     // 2. Check if any unanswered question remains
     const answeredCount = Object.keys(userAnswers).filter(
-      (k) => userAnswers[Number(k)] !== undefined && userAnswers[Number(k)] !== ''
+      (k) => userAnswers[Number(k)] !== undefined && userAnswers[Number(k)].trim() !== ''
     ).length;
 
     if (answeredCount < totalQuestions) {
@@ -219,16 +236,33 @@ export const ExamScreen: React.FC<ExamScreenProps> = ({
     setShowSuccessModal(false);
 
     let correctCount = 0;
+    let totalScoreObtained = 0;
+    let totalScorePossible = 0;
+
     bank.questions.forEach((q, idx) => {
-      const selected = userAnswers[idx];
-      const correctOpt = q.options.find((o) => o.is_correct);
-      if (correctOpt && selected === correctOpt.option_letter) {
-        correctCount++;
+      const norm = normalizeQuestion(q, idx, bank.title || bank.subject);
+      const isEssay = norm.type === 'esai';
+      const userAns = userAnswers[idx] || '';
+
+      if (isEssay) {
+        const weight = norm.scoreWeight || 10;
+        totalScorePossible += weight;
+        if (userAns.trim().length >= 3) {
+          correctCount++;
+          totalScoreObtained += weight;
+        }
+      } else {
+        totalScorePossible += 10;
+        const correctOpt = norm.optionsList.find((o) => o.isCorrect);
+        if (correctOpt && userAns.trim() === correctOpt.letter) {
+          correctCount++;
+          totalScoreObtained += 10;
+        }
       }
     });
 
     const wrongCount = totalQuestions - correctCount;
-    const score = Math.round((correctCount / totalQuestions) * 100);
+    const score = totalScorePossible > 0 ? Math.round((totalScoreObtained / totalScorePossible) * 100) : 0;
     const passed = score >= 70;
 
     const secondsSpent = Math.max(1, Math.floor((Date.now() - startTime) / 1000));
@@ -362,9 +396,29 @@ export const ExamScreen: React.FC<ExamScreenProps> = ({
         <div className="flex-1 overflow-y-auto p-6 md:p-8 space-y-6 max-w-4xl mx-auto w-full">
           {/* Question Number Badge */}
           <div className="flex items-center justify-between border-b border-slate-800 pb-4">
-            <span className="px-3 py-1 bg-indigo-600 text-white font-black text-xs rounded-lg shadow-sm">
-              Soal Nomor {currentIndex + 1} / {totalQuestions}
-            </span>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="px-3 py-1 bg-indigo-600 text-white font-black text-xs rounded-lg shadow-sm">
+                Soal Nomor {currentIndex + 1} / {totalQuestions}
+              </span>
+              {(() => {
+                const norm = normalizeQuestion(currentQuestion, currentIndex, bank.title || bank.subject);
+                const isEssay = norm.type === 'esai';
+                return isEssay ? (
+                  <span className="px-2.5 py-1 bg-amber-500/15 text-amber-300 font-bold text-[11px] rounded-lg border border-amber-500/30 flex items-center gap-1">
+                    <PenTool className="w-3 h-3 text-amber-400" />
+                    Soal Esai (Uraian) • Bobot: {norm.scoreWeight || 10} Poin
+                  </span>
+                ) : (
+                  <span className="px-2.5 py-1 bg-blue-500/10 text-blue-300 font-medium text-[11px] rounded-lg border border-blue-500/20">
+                    Pilihan Ganda
+                  </span>
+                );
+              })()}
+              <span className="hidden sm:inline-flex items-center gap-1 text-[11px] bg-slate-800/80 text-slate-400 px-2 py-0.5 rounded-md border border-slate-700/60">
+                <Type className="w-3 h-3 text-indigo-400" />
+                {activeFont.name.split('(')[0].trim()} ({appliedFontSize})
+              </span>
+            </div>
 
             {flaggedQuestions[currentIndex] && (
               <span className="px-2.5 py-1 bg-amber-500/10 text-amber-300 font-bold text-[11px] rounded-lg border border-amber-500/20 flex items-center gap-1">
@@ -373,15 +427,49 @@ export const ExamScreen: React.FC<ExamScreenProps> = ({
             )}
           </div>
 
-          {/* Question Text */}
+          {/* Question Text & Content */}
           {(() => {
             const normQ = normalizeQuestion(currentQuestion, currentIndex, bank.title || bank.subject);
+            const isEssay = normQ.type === 'esai';
+            const isArabicQuestion =
+              activeFont.isArabic || /[\u0600-\u06FF]/.test(normQ.questionText);
+            const lineSpacing = isArabicQuestion ? '2.3' : '1.7';
+
             return (
               <>
                 <div className="p-6 bg-[#0f172a] rounded-2xl border border-slate-800 shadow-sm space-y-4">
-                  <p className="text-base font-bold text-slate-100 leading-relaxed">
+                  <p
+                    className="font-bold text-slate-100 leading-relaxed"
+                    style={{
+                      fontFamily: activeFont.family,
+                      fontSize: appliedFontSize,
+                      direction: isArabicQuestion ? 'rtl' : 'ltr',
+                      lineHeight: lineSpacing,
+                    }}
+                  >
                     {normQ.questionText}
                   </p>
+
+                  {/* Teks Arab Tambahan Jika Ada */}
+                  {normQ.arabicText && (
+                    <div
+                      className="p-4 bg-slate-900/90 rounded-xl border border-amber-500/20 text-amber-100 text-right leading-loose shadow-inner"
+                      style={{
+                        fontFamily: activeFont.isArabic ? activeFont.family : "'Amiri Quran', 'Amiri', serif",
+                        fontSize: '20px',
+                        direction: 'rtl',
+                      }}
+                    >
+                      {normQ.arabicText}
+                    </div>
+                  )}
+
+                  {/* Terjemahan Jika Ada */}
+                  {normQ.translationText && (
+                    <p className="text-xs text-slate-400 italic">
+                      Artinya: "{normQ.translationText}"
+                    </p>
+                  )}
 
                   {/* Gambar Lampiran Soal */}
                   {normQ.gambarUrl && (
@@ -395,33 +483,92 @@ export const ExamScreen: React.FC<ExamScreenProps> = ({
                   )}
                 </div>
 
-                {/* Options List */}
-                <div className="space-y-3">
-                  {normQ.optionsList.map((option) => {
-                    const isSelected = userAnswers[currentIndex] === option.letter;
-                    return (
-                      <button
-                        key={option.letter}
-                        type="button"
-                        onClick={() => handleSelectOption(option.letter)}
-                        className={`w-full p-4 rounded-2xl border text-left flex items-start gap-3.5 transition-all cursor-pointer ${
-                          isSelected
-                            ? 'bg-indigo-600/15 border-indigo-500 shadow-md shadow-indigo-500/10 text-indigo-200 font-bold'
-                            : 'bg-[#0f172a] border-slate-800 hover:border-slate-700 hover:bg-slate-800/50 text-slate-200 font-medium'
-                        }`}
-                      >
-                        <span
-                          className={`w-7 h-7 rounded-xl flex items-center justify-center font-black text-xs shrink-0 transition-colors ${
-                            isSelected ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 border border-slate-700'
+                {/* Question Interactive Area: Essay Textarea OR Multiple Choice Buttons */}
+                {isEssay ? (
+                  <div className="space-y-2.5">
+                    <label className="text-xs font-bold text-amber-300 flex items-center justify-between">
+                      <span className="flex items-center gap-1.5">
+                        <PenTool className="w-3.5 h-3.5 text-amber-400" />
+                        Tuliskan Lembar Jawaban Uraian / Esai Anda:
+                      </span>
+                      <span className="text-[11px] font-mono text-slate-400">
+                        {(userAnswers[currentIndex] || '').length} karakter
+                      </span>
+                    </label>
+
+                    <textarea
+                      value={userAnswers[currentIndex] || ''}
+                      onChange={(e) => handleAnswerEssay(e.target.value)}
+                      placeholder={
+                        isArabicQuestion
+                          ? 'اكتب إجابتك بالتفصيل هنا...'
+                          : 'Ketik jawaban lengkap / uraian esai Anda di sini...'
+                      }
+                      rows={6}
+                      style={{
+                        fontFamily: activeFont.family,
+                        fontSize: appliedFontSize,
+                        direction:
+                          isArabicQuestion || /[\u0600-\u06FF]/.test(userAnswers[currentIndex] || '')
+                            ? 'rtl'
+                            : 'ltr',
+                        lineHeight: isArabicQuestion ? '2.2' : '1.7',
+                      }}
+                      className="w-full p-4 bg-[#0f172a] border border-amber-500/40 focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20 rounded-2xl text-slate-100 placeholder-slate-500 font-medium transition-all shadow-inner outline-none"
+                    />
+
+                    <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1">
+                      <span>Jawaban tersimpan otomatis di sesi ini</span>
+                      {userAnswers[currentIndex]?.trim() ? (
+                        <span className="text-emerald-400 font-bold flex items-center gap-1">
+                          <CheckCircle2 className="w-3.5 h-3.5" /> Jawaban Tersimpan
+                        </span>
+                      ) : (
+                        <span className="text-slate-500 italic">Belum dijawab</span>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  /* Options List */
+                  <div className="space-y-3">
+                    {normQ.optionsList.map((option) => {
+                      const isSelected = userAnswers[currentIndex] === option.letter;
+                      const isOptArabic =
+                        activeFont.isArabic || /[\u0600-\u06FF]/.test(option.text);
+                      return (
+                        <button
+                          key={option.letter}
+                          type="button"
+                          onClick={() => handleSelectOption(option.letter)}
+                          className={`w-full p-4 rounded-2xl border text-left flex items-start gap-3.5 transition-all cursor-pointer ${
+                            isSelected
+                              ? 'bg-indigo-600/15 border-indigo-500 shadow-md shadow-indigo-500/10 text-indigo-200 font-bold'
+                              : 'bg-[#0f172a] border-slate-800 hover:border-slate-700 hover:bg-slate-800/50 text-slate-200 font-medium'
                           }`}
                         >
-                          {option.letter}
-                        </span>
-                        <span className="text-sm leading-relaxed pt-0.5">{option.text}</span>
-                      </button>
-                    );
-                  })}
-                </div>
+                          <span
+                            className={`w-7 h-7 rounded-xl flex items-center justify-center font-black text-xs shrink-0 transition-colors ${
+                              isSelected
+                                ? 'bg-indigo-600 text-white'
+                                : 'bg-slate-800 text-slate-300 border border-slate-700'
+                            }`}
+                          >
+                            {option.letter}
+                          </span>
+                          <span
+                            className="text-sm leading-relaxed pt-0.5"
+                            style={{
+                              fontFamily: activeFont.family,
+                              direction: isOptArabic ? 'rtl' : 'ltr',
+                            }}
+                          >
+                            {option.text}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </>
             );
           })()}
@@ -478,7 +625,7 @@ export const ExamScreen: React.FC<ExamScreenProps> = ({
 
             <div className="grid grid-cols-5 gap-2">
               {bank.questions.map((q, idx) => {
-                const isAnswered = userAnswers[idx] !== undefined && userAnswers[idx] !== '';
+                const isAnswered = userAnswers[idx] !== undefined && userAnswers[idx].trim() !== '';
                 const isFlagged = flaggedQuestions[idx];
                 const isCurrent = idx === currentIndex;
 
@@ -499,7 +646,9 @@ export const ExamScreen: React.FC<ExamScreenProps> = ({
                   >
                     <span>{idx + 1}</span>
                     {isAnswered && !isCurrent && (
-                      <span className="text-[9px] opacity-90">{userAnswers[idx]}</span>
+                      <span className="text-[9px] font-bold opacity-90">
+                        {userAnswers[idx].length <= 2 ? userAnswers[idx] : '✓'}
+                      </span>
                     )}
                   </button>
                 );
@@ -545,7 +694,7 @@ export const ExamScreen: React.FC<ExamScreenProps> = ({
             <div className="flex-1 overflow-y-auto pr-1">
               <div className="grid grid-cols-5 gap-2">
                 {bank.questions.map((q, idx) => {
-                  const isAnswered = userAnswers[idx] !== undefined && userAnswers[idx] !== '';
+                  const isAnswered = userAnswers[idx] !== undefined && userAnswers[idx].trim() !== '';
                   const isFlagged = flaggedQuestions[idx];
                   const isCurrent = idx === currentIndex;
 
@@ -569,7 +718,9 @@ export const ExamScreen: React.FC<ExamScreenProps> = ({
                     >
                       <span className="text-sm font-bold">{idx + 1}</span>
                       {isAnswered && !isCurrent && (
-                        <span className="text-[9px] opacity-90">{userAnswers[idx]}</span>
+                        <span className="text-[9px] font-bold opacity-90">
+                          {userAnswers[idx].length <= 2 ? userAnswers[idx] : '✓'}
+                        </span>
                       )}
                     </button>
                   );

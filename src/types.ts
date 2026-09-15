@@ -74,6 +74,9 @@ export interface Question {
   options: QuestionOption[];
   explanation: string;
   gambarUrl?: string;
+  type?: 'pilihan_ganda' | 'esai' | string;
+  essayAnswerKey?: string;
+  scoreWeight?: number;
 }
 
 export interface QuestionBank {
@@ -90,6 +93,8 @@ export interface QuestionBank {
   durationMinutes: number;
   minWorkingMinutes?: number;
   updatedAt?: string;
+  fontFamily?: string;
+  fontSize?: string;
 }
 
 export interface ExamResult {

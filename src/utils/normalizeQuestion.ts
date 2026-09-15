@@ -15,6 +15,9 @@ export interface NormalizedQuestion {
   subjectName?: string;
   surahNumber?: number;
   ayahNumber?: number;
+  type?: 'pilihan_ganda' | 'esai' | string;
+  essayAnswerKey?: string;
+  scoreWeight?: number;
 }
 
 /**
@@ -172,6 +175,11 @@ export function normalizeQuestion(
   const rawGambar = q.gambarUrl || q.imageUrl || q.gambar_url || q.image_url || q.gambar || q.foto || undefined;
   const gambarUrl = typeof rawGambar === 'string' && rawGambar.trim() ? rawGambar.trim() : undefined;
 
+  // 7. Resolve Question Type & Essay Key
+  const resolvedType = q.type || (optionsList.length === 0 ? 'esai' : 'pilihan_ganda');
+  const essayAnswerKey = q.essayAnswerKey || q.kunciEsai || q.kunci_jawaban || q.kunci || '';
+  const scoreWeight = Number(q.scoreWeight) || 10;
+
   return {
     id,
     questionNumber,
@@ -189,5 +197,8 @@ export function normalizeQuestion(
     subjectName: q.subject_name || q.subject || '',
     surahNumber: q.surah_number || q.surahNumber,
     ayahNumber: q.ayah_number || q.ayahNumber,
+    type: resolvedType,
+    essayAnswerKey,
+    scoreWeight,
   };
 }
