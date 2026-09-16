@@ -21,6 +21,7 @@ export const ExamHistoryView: React.FC<ExamHistoryViewProps> = ({
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedSubject, setSelectedSubject] = useState<string>('ALL');
+  const [selectedClass, setSelectedClass] = useState<string>('ALL');
   const [selectedResult, setSelectedResult] = useState<ExamResult | null>(null);
 
   // Synchronize Exam Result Detail modal with browser history
@@ -76,12 +77,23 @@ export const ExamHistoryView: React.FC<ExamHistoryViewProps> = ({
     return { totalExams, avgScore, passedCount, remedialCount };
   }, [isStudent, roleFilteredResults]);
 
+  // Derived list of unique classes from role-filtered results
+  const uniqueClasses = useMemo(() => {
+    const classNames: string[] = roleFilteredResults
+      .map((r) => r.classRoom?.trim())
+      .filter((cls): cls is string => Boolean(cls));
+    const setList: string[] = Array.from(new Set(classNames));
+    return setList.sort((a: string, b: string) =>
+      a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })
+    );
+  }, [roleFilteredResults]);
+
   // Derived list of unique subjects from role-filtered results
   const uniqueSubjects = useMemo(() => {
     return Array.from(new Set(roleFilteredResults.map((r) => r.subject.trim()))).filter(Boolean);
   }, [roleFilteredResults]);
 
-  // Search & Subject Filter applied on role-filtered data
+  // Search, Class & Subject Filter applied on role-filtered data
   const filtered = useMemo(() => {
     return roleFilteredResults.filter((r) => {
       const searchLower = searchTerm.toLowerCase();
@@ -91,14 +103,15 @@ export const ExamHistoryView: React.FC<ExamHistoryViewProps> = ({
           (r.examTitle && r.examTitle.toLowerCase().includes(searchLower))
         : r.studentName.toLowerCase().includes(searchLower) ||
           r.subject.toLowerCase().includes(searchLower) ||
-          r.classRoom.toLowerCase().includes(searchLower) ||
+          (r.classRoom && r.classRoom.toLowerCase().includes(searchLower)) ||
           r.token.toLowerCase().includes(searchLower) ||
           (r.examTitle && r.examTitle.toLowerCase().includes(searchLower));
 
       const matchesSubject = selectedSubject === 'ALL' || r.subject.trim() === selectedSubject;
-      return matchesSearch && matchesSubject;
+      const matchesClass = selectedClass === 'ALL' || (r.classRoom && r.classRoom.trim() === selectedClass);
+      return matchesSearch && matchesSubject && matchesClass;
     });
-  }, [roleFilteredResults, searchTerm, selectedSubject, isStudent]);
+  }, [roleFilteredResults, searchTerm, selectedSubject, selectedClass, isStudent]);
 
   const [deleteConfirmTarget, setDeleteConfirmTarget] = useState<ExamResult | null>(null);
   const [showClearAllModal, setShowClearAllModal] = useState<boolean>(false);
@@ -207,10 +220,10 @@ export const ExamHistoryView: React.FC<ExamHistoryViewProps> = ({
       )}
 
       {/* Top Header & Search Controls */}
-      <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4 bg-[#0f172a] p-4 rounded-2xl border border-slate-800 shadow-sm">
-        <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto flex-1">
+      <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4 bg-[#0f172a] p-4 rounded-2xl border border-slate-800 shadow-sm">
+        <div className="flex flex-col sm:flex-row items-center gap-3 w-full lg:w-auto flex-1 flex-wrap">
           {/* Search Box */}
-          <div className="relative w-full sm:w-72">
+          <div className="relative w-full sm:w-64">
             <Search className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
             <input
               type="text"
@@ -224,6 +237,28 @@ export const ExamHistoryView: React.FC<ExamHistoryViewProps> = ({
               className="w-full pl-9 pr-3 py-2 bg-slate-800/80 border border-slate-700 rounded-xl text-xs text-slate-100 placeholder-slate-400 focus:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
           </div>
+
+          {/* Filter Kelas Dropdown (Especially for Guru & Admin, but also available whenever classes exist) */}
+          {!isStudent && uniqueClasses.length > 0 && (
+            <div className="relative w-full sm:w-56">
+              <GraduationCap className="w-3.5 h-3.5 absolute left-3 top-3 text-emerald-400" />
+              <select
+                value={selectedClass}
+                onChange={(e) => setSelectedClass(e.target.value)}
+                className="w-full pl-8 pr-3 py-2 bg-slate-800/80 border border-slate-700 rounded-xl text-xs text-emerald-200 font-semibold focus:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              >
+                <option value="ALL">Semua Kelas ({roleFilteredResults.length})</option>
+                {uniqueClasses.map((cls) => {
+                  const count = roleFilteredResults.filter((r) => r.classRoom?.trim() === cls).length;
+                  return (
+                    <option key={cls} value={cls}>
+                      {cls} ({count} {count === 1 ? 'ujian' : 'ujian'})
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+          )}
 
           {/* Filter Mapel Dropdown */}
           <div className="relative w-full sm:w-56">
@@ -244,6 +279,22 @@ export const ExamHistoryView: React.FC<ExamHistoryViewProps> = ({
               })}
             </select>
           </div>
+
+          {/* Reset Filters button if any filter is active */}
+          {(selectedClass !== 'ALL' || selectedSubject !== 'ALL' || searchTerm.trim()) && (
+            <button
+              onClick={() => {
+                setSelectedClass('ALL');
+                setSelectedSubject('ALL');
+                setSearchTerm('');
+              }}
+              className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors border border-slate-700 shrink-0 cursor-pointer"
+              title="Reset semua filter dan pencarian"
+            >
+              <XCircle className="w-3.5 h-3.5 text-slate-400" />
+              <span>Reset Filter</span>
+            </button>
+          )}
         </div>
 
         {/* Action Buttons: Only shown for Guru & Admin */}
@@ -251,22 +302,27 @@ export const ExamHistoryView: React.FC<ExamHistoryViewProps> = ({
           <div className="flex flex-wrap items-center gap-2">
             {selectedSubject !== 'ALL' && (
               <button
-                onClick={() => exportExamResultsExcel(roleFilteredResults, selectedSubject)}
+                onClick={() => exportExamResultsExcel(roleFilteredResults, selectedSubject, selectedClass)}
                 className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md shadow-indigo-600/20 transition-colors shrink-0 cursor-pointer"
-                title={`Export khusus rekap ${selectedSubject}`}
+                title={`Export khusus rekap ${selectedSubject}${selectedClass !== 'ALL' ? ` Kelas ${selectedClass}` : ''}`}
               >
                 <Download className="w-4 h-4" />
-                <span>Export {selectedSubject}</span>
+                <span>
+                  Export {selectedSubject}
+                  {selectedClass !== 'ALL' ? ` (${selectedClass})` : ''}
+                </span>
               </button>
             )}
 
             <button
-              onClick={() => exportExamResultsExcel(roleFilteredResults, 'ALL')}
+              onClick={() => exportExamResultsExcel(roleFilteredResults, 'ALL', selectedClass)}
               className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md shadow-emerald-600/20 transition-colors shrink-0 cursor-pointer"
-              title="Export semua nilai per sheet/tab mata pelajaran"
+              title="Export rekap semua nilai per mapel ke format Excel"
             >
               <Download className="w-4 h-4" />
-              <span>Export Excel Rekap Per Mapel</span>
+              <span>
+                Export Excel Rekap {selectedClass !== 'ALL' ? `Kelas ${selectedClass}` : 'Per Mapel'}
+              </span>
             </button>
 
             {roleFilteredResults.length > 0 && (
@@ -289,6 +345,42 @@ export const ExamHistoryView: React.FC<ExamHistoryViewProps> = ({
           </div>
         )}
       </div>
+
+      {/* Quick Class Tabs Filter Pills (For Guru & Admin) */}
+      {!isStudent && uniqueClasses.length > 0 && (
+        <div className="flex items-center gap-2 overflow-x-auto pb-1 text-xs">
+          <span className="text-slate-400 text-[11px] font-bold flex items-center gap-1 shrink-0">
+            <GraduationCap className="w-3.5 h-3.5 text-emerald-400" /> Filter Kelas:
+          </span>
+          <button
+            onClick={() => setSelectedClass('ALL')}
+            className={`px-3 py-1 rounded-full font-bold transition-all shrink-0 cursor-pointer ${
+              selectedClass === 'ALL'
+                ? 'bg-emerald-600 text-white shadow-sm'
+                : 'bg-slate-800/80 text-slate-400 hover:text-white border border-slate-700'
+            }`}
+          >
+            Semua ({roleFilteredResults.length})
+          </button>
+          {uniqueClasses.map((cls) => {
+            const count = roleFilteredResults.filter((r) => r.classRoom?.trim() === cls).length;
+            const isSelected = selectedClass === cls;
+            return (
+              <button
+                key={cls}
+                onClick={() => setSelectedClass(cls)}
+                className={`px-3 py-1 rounded-full font-bold transition-all shrink-0 cursor-pointer ${
+                  isSelected
+                    ? 'bg-emerald-600 text-white shadow-sm'
+                    : 'bg-slate-800/80 text-slate-300 hover:text-white border border-slate-700'
+                }`}
+              >
+                {cls} ({count})
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Quick Subject Tabs Filter Pills */}
       {uniqueSubjects.length > 0 && (
@@ -323,6 +415,55 @@ export const ExamHistoryView: React.FC<ExamHistoryViewProps> = ({
               </button>
             );
           })}
+        </div>
+      )}
+
+      {/* Active Filter Chips indicator */}
+      {!isStudent && (selectedClass !== 'ALL' || selectedSubject !== 'ALL' || searchTerm.trim()) && (
+        <div className="flex flex-wrap items-center gap-2 px-1 text-xs text-slate-400">
+          <span className="font-semibold text-slate-300">Filter Aktif:</span>
+          {selectedClass !== 'ALL' && (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 text-[11px] font-bold">
+              <GraduationCap className="w-3 h-3 text-emerald-400" />
+              <span>Kelas: {selectedClass}</span>
+              <button
+                onClick={() => setSelectedClass('ALL')}
+                className="hover:text-emerald-100 cursor-pointer ml-0.5"
+                title="Hapus filter kelas"
+              >
+                ✕
+              </button>
+            </span>
+          )}
+          {selectedSubject !== 'ALL' && (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 text-[11px] font-bold">
+              <BookOpen className="w-3 h-3 text-indigo-400" />
+              <span>Mapel: {selectedSubject}</span>
+              <button
+                onClick={() => setSelectedSubject('ALL')}
+                className="hover:text-indigo-100 cursor-pointer ml-0.5"
+                title="Hapus filter mapel"
+              >
+                ✕
+              </button>
+            </span>
+          )}
+          {searchTerm.trim() && (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-800 text-slate-300 border border-slate-700 text-[11px] font-bold">
+              <Search className="w-3 h-3 text-slate-400" />
+              <span>Kata kunci: "{searchTerm}"</span>
+              <button
+                onClick={() => setSearchTerm('')}
+                className="hover:text-white cursor-pointer ml-0.5"
+                title="Hapus kata kunci"
+              >
+                ✕
+              </button>
+            </span>
+          )}
+          <span className="text-[11px] text-slate-400 ml-auto">
+            Menampilkan <strong className="text-slate-100">{filtered.length}</strong> dari {roleFilteredResults.length} data
+          </span>
         </div>
       )}
 
@@ -413,8 +554,8 @@ export const ExamHistoryView: React.FC<ExamHistoryViewProps> = ({
                     className="p-8 text-center text-slate-500 text-xs"
                   >
                     {isStudent
-                      ? 'Belum ada data riwayat ujian yang sesuai pencarian.'
-                      : 'Belum ada riwayat ujian siswa tersimpan.'}
+                      ? 'Belum ada data riwayat ujian yang sesuai pencarian atau filter.'
+                      : `Belum ada riwayat ujian siswa yang sesuai filter${selectedClass !== 'ALL' ? ` Kelas "${selectedClass}"` : ''}${selectedSubject !== 'ALL' ? ` Mapel "${selectedSubject}"` : ''}${searchTerm.trim() ? ` dengan pencarian "${searchTerm}"` : ''}.`}
                   </td>
                 </tr>
               )}

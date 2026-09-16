@@ -262,9 +262,16 @@ function sanitizeSheetName(name: string): string {
 }
 
 // Export Exam Results to Excel with per-subject sheets & summary
-export function exportExamResultsExcel(results: ExamResult[], targetSubject?: string) {
-  if (!results || results.length === 0) {
-    alert('Tidak ada data hasil ujian untuk di-export.');
+export function exportExamResultsExcel(results: ExamResult[], targetSubject?: string, targetClass?: string) {
+  let activeResults = results;
+  if (targetClass && targetClass !== 'ALL') {
+    activeResults = activeResults.filter(
+      (r) => r.classRoom && r.classRoom.trim().toLowerCase() === targetClass.trim().toLowerCase()
+    );
+  }
+
+  if (!activeResults || activeResults.length === 0) {
+    alert(`Tidak ada data hasil ujian${targetClass && targetClass !== 'ALL' ? ` untuk kelas ${targetClass}` : ''} untuk di-export.`);
     return;
   }
 
@@ -305,30 +312,33 @@ export function exportExamResultsExcel(results: ExamResult[], targetSubject?: st
     { wch: 14 }, // STATUS
   ];
 
+  const classSuffix = targetClass && targetClass !== 'ALL' ? `_${targetClass.replace(/\s+/g, '_')}` : '';
+
   // If a specific target subject is chosen
   if (targetSubject && targetSubject !== 'ALL') {
-    const subjectResults = results.filter(
+    const subjectResults = activeResults.filter(
       (r) => r.subject.trim().toLowerCase() === targetSubject.trim().toLowerCase()
     );
-    const dataList = subjectResults.length > 0 ? subjectResults : results;
+    const dataList = subjectResults.length > 0 ? subjectResults : activeResults;
     const data = formatRows(dataList);
     const ws = XLSX.utils.json_to_sheet(data);
     ws['!cols'] = colWidths;
     const cleanSubjectName = sanitizeSheetName(targetSubject);
     XLSX.utils.book_append_sheet(wb, ws, cleanSubjectName);
-    XLSX.writeFile(wb, `Rekap_Nilai_${cleanSubjectName.replace(/\s+/g, '_')}_CBT.xlsx`);
+    XLSX.writeFile(wb, `Rekap_Nilai_${cleanSubjectName.replace(/\s+/g, '_')}${classSuffix}_CBT.xlsx`);
     return;
   }
 
   // 1. Summary Sheet ("Rekap Semua Mapel")
-  const summaryData = formatRows(results);
+  const summaryData = formatRows(activeResults);
   const wsSummary = XLSX.utils.json_to_sheet(summaryData);
   wsSummary['!cols'] = colWidths;
-  XLSX.utils.book_append_sheet(wb, wsSummary, 'Rekap Semua Mapel');
+  const summaryTitle = targetClass && targetClass !== 'ALL' ? sanitizeSheetName(`Rekap ${targetClass}`) : 'Rekap Semua Mapel';
+  XLSX.utils.book_append_sheet(wb, wsSummary, summaryTitle);
 
   // 2. Individual Per-Subject Sheets
   const subjectsMap: Record<string, ExamResult[]> = {};
-  results.forEach((r) => {
+  activeResults.forEach((r) => {
     const subjKey = r.subject.trim() || 'Lain-lain';
     if (!subjectsMap[subjKey]) {
       subjectsMap[subjKey] = [];
@@ -336,7 +346,7 @@ export function exportExamResultsExcel(results: ExamResult[], targetSubject?: st
     subjectsMap[subjKey].push(r);
   });
 
-  const usedSheetNames = new Set<string>(['REKAP SEMUA MAPEL']);
+  const usedSheetNames = new Set<string>([summaryTitle.toUpperCase()]);
 
   Object.entries(subjectsMap).forEach(([subjName, subjResults]) => {
     let cleanName = sanitizeSheetName(subjName);
@@ -354,7 +364,7 @@ export function exportExamResultsExcel(results: ExamResult[], targetSubject?: st
     XLSX.utils.book_append_sheet(wb, wsSubj, uniqueName);
   });
 
-  XLSX.writeFile(wb, 'Rekap_Nilai_Ujian_Per_Mapel_CBT.xlsx');
+  XLSX.writeFile(wb, `Rekap_Nilai_Ujian${classSuffix}_Per_Mapel_CBT.xlsx`);
 }
 
 // Export PDF / Print Layout for Answer Keys
