@@ -78,7 +78,9 @@ import {
   syncExamResultToFirestore,
   syncGameLogToFirestore,
   deleteGameLogFromFirestore,
+  deleteGameLogsBulkFromFirestore,
   clearAllGameLogsInFirestore,
+  purgeAdministratorLoginLog,
   isBankDeletedLocally,
   AppData,
 } from './utils/firebaseSync';
@@ -289,9 +291,12 @@ export default function App() {
       lastSyncedDataRef.current.gameLogs = data.gameLogs;
     }
     if (Array.isArray(data.loginLogs) && !isDeepEqual(loginLogsRef.current, data.loginLogs)) {
-      setLoginLogs(data.loginLogs);
-      saveStoredLoginLogs(data.loginLogs);
-      lastSyncedDataRef.current.loginLogs = data.loginLogs;
+      const cleanLogs = data.loginLogs.filter(
+        (l) => l && (!l.name || l.name.trim().toLowerCase() !== 'administrator')
+      );
+      setLoginLogs(cleanLogs);
+      saveStoredLoginLogs(cleanLogs);
+      lastSyncedDataRef.current.loginLogs = cleanLogs;
     }
     if (Array.isArray(data.dailyGrades) && !isDeepEqual(dailyGradesRef.current, data.dailyGrades)) {
       setDailyGrades(data.dailyGrades);
@@ -348,6 +353,7 @@ export default function App() {
     // 2. Fetch and subscribe to Firebase Cloud Firestore
     const performSync = async () => {
       try {
+        await purgeAdministratorLoginLog();
         const remoteData = await fetchAppDataFromFirestore(true);
         if (remoteData) {
           applyRemoteData(remoteData, false);
@@ -400,17 +406,25 @@ export default function App() {
     };
   }, []);
 
-  // Heartbeat Mechanism: Periodic active status ping for logged-in user (Guru, Siswa, Admin)
-  useEffect(() => {
-    if (!currentUser) return;
+  // Ref to hold the current user's live active work / activity
+  const currentUserActivityRef = useRef<{ activity: string; details?: string }>({
+    activity: 'Baru Saja Login',
+    details: 'Masuk ke sistem CBT',
+  });
 
-    const pingHeartbeat = () => {
+  // Centralized function to instantly update user's live activity in state & Firestore (Real-time)
+  const updateUserActivity = useCallback(
+    (activity: string, details?: string) => {
+      if (!currentUser) return;
+      currentUserActivityRef.current = { activity, details };
+
       const now = new Date();
       const formattedTime = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
 
       let identifier = currentUser.username || '';
       let classRoom: string | undefined = undefined;
       let positionOrSubject: string | undefined = undefined;
+      let finalName = currentUser.name;
 
       if (currentUser.role === 'siswa' && currentUser.details && 'nisn' in currentUser.details) {
         identifier = currentUser.details.nisn || currentUser.details.nis || currentUser.username || '';
@@ -419,41 +433,74 @@ export default function App() {
         identifier = currentUser.details.nip || currentUser.details.nuptk || currentUser.username || '';
         positionOrSubject = `${currentUser.details.position || 'Guru'}${currentUser.details.subject ? ` (${currentUser.details.subject})` : ''}`;
       } else if (currentUser.role === 'admin') {
+        if (!finalName || finalName.trim().toLowerCase() === 'administrator') {
+          finalName = 'Administrator System';
+        }
         positionOrSubject = 'Administrator Sistem';
       }
 
+      if (finalName.trim().toLowerCase() === 'administrator') {
+        return;
+      }
+
+      const deterministicId = `login-${currentUser.role}-${finalName.replace(/\s+/g, '-').toLowerCase()}`;
+
       const updatedLog: UserLoginLog = {
-        id: `login-${currentUser.role}-${currentUser.name.replace(/\s+/g, '-').toLowerCase()}`,
-        userId: currentUser.details?.id || currentUser.username || currentUser.name,
-        name: currentUser.name,
+        id: deterministicId,
+        userId: currentUser.details?.id || currentUser.username || finalName,
+        name: finalName,
         role: currentUser.role,
         identifier: identifier || currentUser.username || '-',
         classRoom,
         positionOrSubject,
         loginTime: formattedTime,
         lastSeenTime: formattedTime,
+        lastActiveTimestamp: Date.now(),
+        currentActivity: activity,
+        activityDetails: details,
+        status: 'online',
         photoUrl: currentUser.photoUrl,
       };
 
       setLoginLogs((prev) => {
+        const existing = prev.find(
+          (l) => l.name.toLowerCase() === finalName.toLowerCase() && l.role === currentUser.role
+        );
+        if (existing?.loginTime) {
+          updatedLog.loginTime = existing.loginTime;
+        }
         const filtered = prev.filter(
-          (l) => !(l.name.toLowerCase() === currentUser.name.toLowerCase() && l.role === currentUser.role)
+          (l) =>
+            !(l.name.toLowerCase() === finalName.toLowerCase() && l.role === currentUser.role) &&
+            l.name.trim().toLowerCase() !== 'administrator'
         );
         const nextLogs = [updatedLog, ...filtered];
         saveStoredLoginLogs(nextLogs);
+        broadcastAppDataChange({ loginLogs: nextLogs });
         return nextLogs;
       });
 
       trackUserLoginInFirestore(updatedLog);
+    },
+    [currentUser]
+  );
+
+  // Heartbeat Mechanism: Periodic active status ping every 15s to keep real-time monitoring perfectly live
+  useEffect(() => {
+    if (!currentUser) return;
+
+    const pingHeartbeat = () => {
+      const activeState = currentUserActivityRef.current;
+      updateUserActivity(activeState.activity, activeState.details);
     };
 
     // Initial heartbeat on mount
     pingHeartbeat();
 
-    // Heartbeat every 45 seconds while session is active
-    const heartbeatTimer = setInterval(pingHeartbeat, 45000);
+    // Heartbeat every 15 seconds while session is active for real-time monitoring
+    const heartbeatTimer = setInterval(pingHeartbeat, 15000);
     return () => clearInterval(heartbeatTimer);
-  }, [currentUser]);
+  }, [currentUser, updateUserActivity]);
 
   // Synchronize Favicon, Web App Icons, Meta Tags, and Document Title with School Profile & Custom Logo
   useEffect(() => {
@@ -584,19 +631,23 @@ export default function App() {
 
     // Update teachers or students list to record lastLogin
     if (user.role === 'guru') {
-      setTeachers((prev) =>
-        prev.map((t) => {
+      setTeachers((prev) => {
+        const updated = prev.map((t) => {
           const isMatch =
             (user.details && 'id' in user.details && t.id === user.details.id) ||
             t.name.trim().toLowerCase() === user.name.trim().toLowerCase() ||
             (t.username && t.username.trim().toLowerCase() === (user.username || '').trim().toLowerCase()) ||
             (t.nip && t.nip === identifier);
           return isMatch ? { ...t, lastLogin: formattedTime } : t;
-        })
-      );
+        });
+        saveStoredTeachers(updated);
+        broadcastAppDataChange({ teachers: updated });
+        saveAppDataToFirestore({ teachers: updated });
+        return updated;
+      });
     } else if (user.role === 'siswa') {
-      setStudents((prev) =>
-        prev.map((s) => {
+      setStudents((prev) => {
+        const updated = prev.map((s) => {
           const isMatch =
             (user.details && 'id' in user.details && s.id === user.details.id) ||
             s.name.trim().toLowerCase() === user.name.trim().toLowerCase() ||
@@ -604,33 +655,67 @@ export default function App() {
             (s.nisn && s.nisn === identifier) ||
             (s.nis && s.nis === identifier);
           return isMatch ? { ...s, lastLogin: formattedTime } : s;
-        })
-      );
+        });
+        saveStoredStudents(updated);
+        broadcastAppDataChange({ students: updated });
+        saveAppDataToFirestore({ students: updated });
+        return updated;
+      });
     }
 
+    let finalLoginName = user.name;
+    if (user.role === 'admin') {
+      if (!finalLoginName || finalLoginName.trim().toLowerCase() === 'administrator') {
+        finalLoginName = 'Administrator System';
+      }
+      positionOrSubject = 'Administrator Sistem';
+    }
+
+    const deterministicId = `login-${user.role}-${finalLoginName.replace(/\s+/g, '-').toLowerCase()}`;
+    const initialActivity =
+      user.role === 'siswa'
+        ? 'Baru Saja Login'
+        : user.role === 'guru'
+        ? 'Masuk ke Ruang Guru'
+        : 'Masuk ke Dasbor Admin';
+    const initialDetails =
+      user.role === 'siswa'
+        ? 'Belum Mengerjakan Ujian/Game (Hanya Login)'
+        : 'Monitoring Sistem CBT';
+    currentUserActivityRef.current = { activity: initialActivity, details: initialDetails };
+
     const newLog: UserLoginLog = {
-      id: `login-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-      userId: user.details?.id || user.username || user.name,
-      name: user.name,
+      id: deterministicId,
+      userId: user.details?.id || user.username || finalLoginName,
+      name: finalLoginName,
       role: user.role,
       identifier: identifier || user.username || '-',
       classRoom,
       positionOrSubject,
       loginTime: formattedTime,
       lastSeenTime: formattedTime,
+      lastActiveTimestamp: Date.now(),
+      currentActivity: initialActivity,
+      activityDetails: initialDetails,
+      status: 'online',
       photoUrl: user.photoUrl,
     };
 
-    setLoginLogs((prev) => {
-      const filtered = prev.filter(
-        (l) => !(l.name.toLowerCase() === user.name.toLowerCase() && l.role === user.role)
-      );
-      const updated = [newLog, ...filtered];
-      saveStoredLoginLogs(updated);
-      return updated;
-    });
+    if (finalLoginName.trim().toLowerCase() !== 'administrator') {
+      setLoginLogs((prev) => {
+        const filtered = prev.filter(
+          (l) =>
+            !(l.name.toLowerCase() === finalLoginName.toLowerCase() && l.role === user.role) &&
+            l.name.trim().toLowerCase() !== 'administrator'
+        );
+        const updated = [newLog, ...filtered];
+        saveStoredLoginLogs(updated);
+        broadcastAppDataChange({ loginLogs: updated });
+        return updated;
+      });
 
-    trackUserLoginInFirestore(newLog);
+      trackUserLoginInFirestore(newLog);
+    }
 
     const targetTab = user.role === 'siswa' ? 'mulai-ujian' : user.role === 'guru' ? 'bank-soal' : 'dashboard';
     setActiveTab(targetTab);
@@ -643,6 +728,33 @@ export default function App() {
   };
 
   const handleLogout = () => {
+    // 0. Update status to offline in Firestore before resetting local state
+    if (currentUser) {
+      const now = new Date();
+      const formattedTime = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+      let finalName = currentUser.name;
+      if (currentUser.role === 'admin' && (!finalName || finalName.trim().toLowerCase() === 'administrator')) {
+        finalName = 'Administrator System';
+      }
+      if (finalName.trim().toLowerCase() !== 'administrator') {
+        const offlineLog: UserLoginLog = {
+          id: `login-${currentUser.role}-${finalName.replace(/\s+/g, '-').toLowerCase()}`,
+          userId: currentUser.details?.id || currentUser.username || finalName,
+          name: finalName,
+          role: currentUser.role,
+          identifier: currentUser.username || '-',
+          loginTime: formattedTime,
+          lastSeenTime: formattedTime,
+          lastActiveTimestamp: Date.now() - 3600000,
+          currentActivity: 'Sudah Logout',
+          activityDetails: 'Keluar dari aplikasi CBT',
+          status: 'offline',
+          photoUrl: currentUser.photoUrl,
+        };
+        trackUserLoginInFirestore(offlineLog);
+      }
+    }
+
     // 1. Reset user state & login flag
     setCurrentUser(null);
     setIsLoggedIn(false);
@@ -778,16 +890,24 @@ export default function App() {
     }
   }, [schoolProfile]);
 
-  const handleSaveGameLog = useCallback((newLog: GameHistoryLog) => {
-    setGameLogs((prev) => {
-      const exists = prev.some((l) => l.id === newLog.id);
-      if (exists) return prev;
-      const updated = [newLog, ...prev];
-      saveStoredGameLogs(updated);
-      return updated;
-    });
-    syncGameLogToFirestore(newLog);
-  }, []);
+  const handleSaveGameLog = useCallback(
+    (newLog: GameHistoryLog) => {
+      setGameLogs((prev) => {
+        const exists = prev.some((l) => l.id === newLog.id);
+        if (exists) return prev;
+        const updated = [newLog, ...prev];
+        saveStoredGameLogs(updated);
+        return updated;
+      });
+      syncGameLogToFirestore(newLog);
+
+      updateUserActivity(
+        `Selesai Bermain Game: ${newLog.gameTitle || newLog.gameType}`,
+        `Skor: ${newLog.score} Poin (${newLog.subject || 'Game Edukasi'})`
+      );
+    },
+    [updateUserActivity]
+  );
 
   const handleClearGameLogs = useCallback(() => {
     setGameLogs([]);
@@ -802,6 +922,16 @@ export default function App() {
       return updated;
     });
     deleteGameLogFromFirestore(id);
+  }, []);
+
+  const handleDeleteGameLogsBulk = useCallback((ids: string[]) => {
+    const idSet = new Set(ids);
+    setGameLogs((prev) => {
+      const updated = prev.filter((item) => !idSet.has(item.id));
+      saveStoredGameLogs(updated);
+      return updated;
+    });
+    deleteGameLogsBulkFromFirestore(ids);
   }, []);
 
   const handleRefreshGameLogs = useCallback(async (): Promise<boolean> => {
@@ -866,6 +996,50 @@ export default function App() {
     });
   };
 
+  // Helper to map tab names to clean Indonesian activity descriptions
+  const getTabActivityDescription = (tab: ActiveTab): { activity: string; details?: string } => {
+    switch (tab) {
+      case 'dashboard':
+        return { activity: 'Melihat Dashboard & Statistik', details: 'Monitoring CBT & Keaktifan' };
+      case 'mulai-ujian':
+        return { activity: 'Melihat Daftar Sesi Ujian', details: 'Memilih Ujian yang Tersedia' };
+      case 'riwayat-ujian':
+        return { activity: 'Melihat Riwayat Hasil Ujian', details: 'Daftar Nilai & Evaluasi' };
+      case 'ai-pembuat-game':
+        return { activity: 'Bermain Game Edukasi', details: 'Arena Game Pembelajaran Interaktif' };
+      case 'riwayat-game':
+        return { activity: 'Melihat Riwayat Game Edukasi', details: 'Peringkat & Skor Game' };
+      case 'nilai-harian':
+        return { activity: 'Melihat & Input Nilai Harian', details: 'Buku Nilai Siswa' };
+      case 'data-guru':
+        return { activity: 'Mengelola Data Guru', details: 'Database Tenaga Pengajar' };
+      case 'data-siswa':
+        return { activity: 'Mengelola Data Siswa', details: 'Database Peserta Didik' };
+      case 'mata-pelajaran':
+        return { activity: 'Mengelola Mata Pelajaran', details: 'Daftar Kurikulum & Mapel' };
+      case 'bank-soal':
+        return { activity: 'Mengelola Bank Soal & Ujian', details: 'Editor Butir Soal CBT' };
+      case 'pembuat-soal-ai':
+        return { activity: 'Pembuat Soal Berbasis AI', details: 'Generator Soal Otomatis' };
+      case 'ekstrak-dokumen':
+        return { activity: 'Ekstrak Dokumen / Buat Soal AI', details: 'Import Dokumen Bank Soal' };
+      case 'kumpulan-jawaban':
+        return { activity: 'Melihat Kumpulan Lembar Jawaban', details: 'Koreksi & Verifikasi Jawaban' };
+      case 'profil-saya':
+        return { activity: 'Mengatur Profil Pengguna', details: 'Biodata & Foto Akun' };
+      case 'profil-sekolah':
+        return { activity: 'Mengatur Profil Sekolah', details: 'Identitas & Logo Satuan Pendidikan' };
+      case 'hak-akses':
+        return { activity: 'Mengatur Hak Akses Role', details: 'Izin Menu & Fitur' };
+      case 'backup-data':
+        return { activity: 'Kelola Backup & Restore', details: 'Cadangan Database Cloud' };
+      case 'reset-data':
+        return { activity: 'Reset / Bersihkan Data', details: 'Pemeliharaan Sistem' };
+      default:
+        return { activity: 'Sedang Aktif di Sistem', details: 'Mengakses Menu CBT' };
+    }
+  };
+
   // 1. Masukkan Setiap Perubahan Tampilan ke dalam History (pushState runtut)
   const handleNavigateTab = useCallback(
     (action: React.SetStateAction<ActiveTab>) => {
@@ -887,10 +1061,14 @@ export default function App() {
         if (isMobileMenuOpen) {
           setIsMobileMenuOpen(false);
         }
+
+        const tabInfo = getTabActivityDescription(next);
+        updateUserActivity(tabInfo.activity, tabInfo.details);
+
         return next;
       });
     },
-    [isMobileMenuOpen]
+    [isMobileMenuOpen, updateUserActivity]
   );
 
   const handleSetMobileMenuOpen = useCallback(
@@ -948,6 +1126,11 @@ export default function App() {
       exam: true,
     });
     setActiveExam({ studentName, classRoom, bank, studentId });
+
+    updateUserActivity(
+      `Sedang Mengerjakan Ujian: ${bank.title || bank.subject}`,
+      `Mapel: ${bank.subject} • Kelas ${classRoom} (${bank.questions?.length || 0} Soal)`
+    );
   };
 
   // Handler when exam is completed
@@ -958,6 +1141,11 @@ export default function App() {
       return updated;
     });
     syncExamResultToFirestore(result);
+
+    updateUserActivity(
+      `Selesai Mengerjakan Ujian: ${result.examTitle || result.bankTitle || result.subject}`,
+      `Nilai: ${result.score} (${result.correctCount ?? result.correctAnswers ?? 0}/${result.totalQuestions} Benar)`
+    );
   };
 
   const handleExitExam = () => {
@@ -966,6 +1154,7 @@ export default function App() {
       window.history.back();
     }
     setActiveExam(null);
+    updateUserActivity('Keluar dari Sesi Ujian', 'Membuka Riwayat Hasil Ujian');
     handleNavigateTab('riwayat-ujian');
   };
 
@@ -1313,6 +1502,7 @@ export default function App() {
               currentUser={currentUser}
               onClearLogs={handleClearGameLogs}
               onDeleteLog={handleDeleteGameLog}
+              onDeleteLogsBulk={handleDeleteGameLogsBulk}
               onRefresh={handleRefreshGameLogs}
             />
           )}

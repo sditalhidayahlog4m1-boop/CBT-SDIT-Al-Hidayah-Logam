@@ -104,10 +104,12 @@ export interface ExamResult {
   classRoom: string;
   subject: string;
   examTitle: string;
+  bankTitle?: string;
   token: string;
   score: number;
   totalQuestions: number;
   correctCount: number;
+  correctAnswers?: number;
   wrongCount: number;
   durationSpent: string; // e.g. "18 menit 45 detik"
   passed: boolean;
@@ -123,6 +125,7 @@ export interface GameHistoryLog {
   studentName: string;
   classRoom: string;
   gameType: string;
+  gameTitle?: string;
   subject: string;
   difficulty?: 'Mudah' | 'Sedang' | 'Sulit' | string;
   topic?: string;
@@ -141,6 +144,10 @@ export interface UserLoginLog {
   positionOrSubject?: string;
   loginTime: string; // e.g. "16/08/2026 15:15:00"
   lastSeenTime?: string;
+  lastActiveTimestamp?: number; // ms timestamp for real-time live ticker ("Baru saja", "1 mnt lalu")
+  currentActivity?: string; // e.g. "Sedang Mengerjakan Ujian", "Bermain Game", "Baru Saja Login", "Melihat Dashboard"
+  activityDetails?: string; // e.g. "Matematika PTS (Soal No. 5)", "Susun Kata Al-Qur'an", "Hanya Login (Belum Mulai)"
+  status?: 'online' | 'idle' | 'offline'; // live status indicator
   device?: string;
   photoUrl?: string;
 }

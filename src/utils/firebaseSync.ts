@@ -204,6 +204,10 @@ export async function fetchAppDataFromFirestore(silent = true): Promise<AppData 
       loginLogsSnap.forEach((d) => {
         const item = d.data() as UserLoginLog;
         if (item && item.id && !isLoginLogDeletedLocally(item.id)) {
+          if (item.name && item.name.trim().toLowerCase() === 'administrator') {
+            deleteDoc(d.ref).catch(() => {});
+            return;
+          }
           loginLogsFromCollection.push(item);
         }
       });
@@ -327,7 +331,7 @@ export async function saveAppDataToFirestore(data: Partial<AppData>): Promise<bo
     if (Array.isArray(loginLogs) && loginLogs.length > 0) {
       const batch = writeBatch(db);
       loginLogs.slice(0, 100).forEach((l) => {
-        if (l && l.id) {
+        if (l && l.id && (!l.name || l.name.trim().toLowerCase() !== 'administrator')) {
           batch.set(doc(db, LOGIN_LOGS_COLLECTION, l.id), l, { merge: true });
         }
       });
@@ -438,6 +442,10 @@ export function subscribeToAppData(
         snap.forEach((d) => {
           const item = d.data() as UserLoginLog;
           if (item && item.id && !isLoginLogDeletedLocally(item.id)) {
+            if (item.name && item.name.trim().toLowerCase() === 'administrator') {
+              deleteDoc(d.ref).catch(() => {});
+              return;
+            }
             list.push(item);
           }
         });
@@ -525,6 +533,52 @@ export async function deleteExamResultFromFirestore(resultId: string): Promise<b
     return true;
   } catch (err) {
     console.warn('[Firestore] Gagal menghapus hasil ujian:', err);
+    return false;
+  }
+}
+
+/**
+ * Permanently delete multiple exam results from Firestore and localStorage in bulk
+ */
+export async function deleteExamResultsBulkFromFirestore(resultIds: string[]): Promise<boolean> {
+  if (!Array.isArray(resultIds) || resultIds.length === 0) return true;
+  const idSet = new Set(resultIds);
+  resultIds.forEach((id) => recordDeletedExamResultId(id));
+
+  // 1. Update localStorage
+  try {
+    const raw = localStorage.getItem('cbt_results');
+    if (raw) {
+      const parsed: ExamResult[] = JSON.parse(raw);
+      const filtered = parsed.filter((item) => item && !idSet.has(item.id));
+      localStorage.setItem('cbt_results', JSON.stringify(filtered));
+    }
+  } catch {}
+
+  const db = getFirestoreDb();
+  if (!db) return true;
+
+  try {
+    const batch = writeBatch(db);
+    resultIds.forEach((id) => {
+      batch.delete(doc(db, EXAM_RESULTS_COLLECTION, id));
+    });
+    await batch.commit().catch(() => {});
+
+    // Remove from app_data/main if present
+    const mainDocRef = doc(db, MAIN_COLLECTION, MAIN_DOCUMENT);
+    const mainSnap = await getDoc(mainDocRef).catch(() => null);
+    if (mainSnap && mainSnap.exists()) {
+      const mainData = mainSnap.data();
+      if (Array.isArray(mainData.results)) {
+        const filtered = mainData.results.filter((r: any) => r && !idSet.has(r.id));
+        await updateDoc(mainDocRef, { results: filtered }).catch(() => {});
+      }
+    }
+    console.log(`[Firestore] Sebanyak ${resultIds.length} hasil ujian berhasil dihapus permanen secara massal.`);
+    return true;
+  } catch (err) {
+    console.warn('[Firestore] Gagal menghapus batch hasil ujian:', err);
     return false;
   }
 }
@@ -623,6 +677,52 @@ export async function deleteGameLogFromFirestore(logId: string): Promise<boolean
 }
 
 /**
+ * Permanently delete multiple game history logs from Firestore and localStorage in bulk
+ */
+export async function deleteGameLogsBulkFromFirestore(logIds: string[]): Promise<boolean> {
+  if (!Array.isArray(logIds) || logIds.length === 0) return true;
+  const idSet = new Set(logIds);
+  logIds.forEach((id) => recordDeletedGameLogId(id));
+
+  // 1. Update localStorage
+  try {
+    const raw = localStorage.getItem('cbt_game_logs');
+    if (raw) {
+      const parsed: GameHistoryLog[] = JSON.parse(raw);
+      const filtered = parsed.filter((item) => item && !idSet.has(item.id));
+      localStorage.setItem('cbt_game_logs', JSON.stringify(filtered));
+    }
+  } catch {}
+
+  const db = getFirestoreDb();
+  if (!db) return true;
+
+  try {
+    const batch = writeBatch(db);
+    logIds.forEach((id) => {
+      batch.delete(doc(db, GAME_LOGS_COLLECTION, id));
+    });
+    await batch.commit().catch(() => {});
+
+    // Remove from app_data/main if present
+    const mainDocRef = doc(db, MAIN_COLLECTION, MAIN_DOCUMENT);
+    const mainSnap = await getDoc(mainDocRef).catch(() => null);
+    if (mainSnap && mainSnap.exists()) {
+      const mainData = mainSnap.data();
+      if (Array.isArray(mainData.gameLogs)) {
+        const filtered = mainData.gameLogs.filter((g: any) => g && !idSet.has(g.id));
+        await updateDoc(mainDocRef, { gameLogs: filtered }).catch(() => {});
+      }
+    }
+    console.log(`[Firestore] Sebanyak ${logIds.length} game logs berhasil dihapus permanen secara massal.`);
+    return true;
+  } catch (err) {
+    console.warn('[Firestore] Gagal menghapus batch game logs:', err);
+    return false;
+  }
+}
+
+/**
  * Permanently clear all game logs from Firestore and localStorage
  */
 export async function clearAllGameLogsInFirestore(): Promise<boolean> {
@@ -705,6 +805,60 @@ export async function deleteLoginLogFromFirestore(logId: string): Promise<boolea
   } catch (err) {
     console.warn('[Firestore] Gagal menghapus login log:', err);
     return false;
+  }
+}
+
+/**
+ * Permanently purge any admin account login log named "Administrator"
+ */
+export async function purgeAdministratorLoginLog(): Promise<void> {
+  // 1. Clean localStorage
+  try {
+    const raw = localStorage.getItem('cbt_login_logs');
+    if (raw) {
+      const parsed: UserLoginLog[] = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        const filtered = parsed.filter(
+          (item) => item && (!item.name || item.name.trim().toLowerCase() !== 'administrator')
+        );
+        localStorage.setItem('cbt_login_logs', JSON.stringify(filtered));
+      }
+    }
+  } catch {}
+
+  const db = getFirestoreDb();
+  if (!db) return;
+
+  try {
+    const snap = await getDocs(collection(db, LOGIN_LOGS_COLLECTION)).catch(() => null);
+    if (snap && !snap.empty) {
+      const batch = writeBatch(db);
+      let count = 0;
+      snap.forEach((d) => {
+        const item = d.data() as UserLoginLog;
+        if (item && item.name && item.name.trim().toLowerCase() === 'administrator') {
+          batch.delete(d.ref);
+          count++;
+        }
+      });
+      if (count > 0) {
+        await batch.commit().catch(() => {});
+      }
+    }
+
+    const mainDocRef = doc(db, MAIN_COLLECTION, MAIN_DOCUMENT);
+    const mainSnap = await getDoc(mainDocRef).catch(() => null);
+    if (mainSnap && mainSnap.exists()) {
+      const mainData = mainSnap.data();
+      if (Array.isArray(mainData.loginLogs)) {
+        const filtered = mainData.loginLogs.filter(
+          (l: any) => l && (!l.name || l.name.trim().toLowerCase() !== 'administrator')
+        );
+        await updateDoc(mainDocRef, { loginLogs: filtered }).catch(() => {});
+      }
+    }
+  } catch (err) {
+    console.warn('[Firestore] Notice cleaning administrator logs:', err);
   }
 }
 

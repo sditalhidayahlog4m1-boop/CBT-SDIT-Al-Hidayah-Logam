@@ -283,12 +283,20 @@ export const MulaiUjianView: React.FC<MulaiUjianViewProps> = ({
               />
             </div>
 
-            {/* Info Box: Token Rahasia */}
-            <div className="p-3 bg-slate-900/60 border border-slate-800 rounded-xl text-slate-400 flex items-start gap-2 text-[11px] leading-relaxed">
-              <Info className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-              <span>
-                Token ujian bersifat rahasia untuk menjaga ketertiban pelaksanaan CBT. Silakan minta token kepada guru pengawas atau administrator ruang ujian.
-              </span>
+            {/* Info Box: Token & Aturan Layar Terkunci */}
+            <div className="p-3.5 bg-slate-900/80 border border-slate-800 rounded-xl text-slate-300 space-y-2 text-[11px] leading-relaxed">
+              <div className="flex items-start gap-2">
+                <Info className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                <span>
+                  Token ujian bersifat rahasia untuk menjaga ketertiban pelaksanaan CBT. Silakan minta token kepada guru pengawas atau administrator ruang ujian.
+                </span>
+              </div>
+              <div className="flex items-start gap-2 pt-2 border-t border-slate-800/90 text-amber-300 font-medium">
+                <Lock className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+                <span>
+                  <strong>Aturan Layar Terkunci:</strong> Saat mulai ujian, layar akan otomatis dikunci ke mode pengerjaan. Peserta tidak dapat keluar atau berpindah aplikasi sebelum batas waktu minimal pengerjaan terpenuhi.
+                </span>
+              </div>
             </div>
 
             {errorMessage && (

@@ -14,6 +14,10 @@ import {
   LogOut,
   PenTool,
   Type,
+  Lock,
+  Unlock,
+  Maximize2,
+  ShieldAlert,
 } from 'lucide-react';
 import { QuestionBank, ExamResult } from '../types';
 import { normalizeQuestion } from '../utils/normalizeQuestion';
@@ -41,9 +45,31 @@ export const ExamScreen: React.FC<ExamScreenProps> = ({
   const [userAnswers, setUserAnswers] = useState<{ [questionIndex: number]: string }>({});
   const [flaggedQuestions, setFlaggedQuestions] = useState<{ [questionIndex: number]: boolean }>({});
 
-  // Countdown Timer
+  // Countdown & Time tracking
   const totalSecondsAllocated = (bank.durationMinutes || 45) * 60;
   const [secondsRemaining, setSecondsRemaining] = useState(totalSecondsAllocated);
+  const [startTime] = useState<number>(Date.now());
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+
+  // Minimum duration constraints & lock condition
+  const minWorkingMinutes = Math.min(
+    bank.minWorkingMinutes !== undefined ? bank.minWorkingMinutes : 30,
+    bank.durationMinutes || 45
+  );
+  const minWorkingSeconds = minWorkingMinutes * 60;
+  const isMinTimePassed =
+    minWorkingMinutes <= 0 || elapsedSeconds >= minWorkingSeconds || secondsRemaining <= 0;
+  const waitRemainingSeconds = Math.max(0, minWorkingSeconds - elapsedSeconds);
+  const waitMinutes = Math.floor(waitRemainingSeconds / 60);
+  const waitSeconds = waitRemainingSeconds % 60;
+  const spentMinutes = Math.floor(elapsedSeconds / 60);
+  const spentSeconds = elapsedSeconds % 60;
+
+  // Screen lock & anti-cheat states
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [showFullscreenRequiredModal, setShowFullscreenRequiredModal] = useState(false);
+  const [showScreenSwitchWarning, setShowScreenSwitchWarning] = useState(false);
+  const [screenSwitchCount, setScreenSwitchCount] = useState(0);
 
   const [showMobilePalette, setShowMobilePalette] = useState(false);
   const [showUnansweredModal, setShowUnansweredModal] = useState(false);
@@ -66,6 +92,110 @@ export const ExamScreen: React.FC<ExamScreenProps> = ({
     AVAILABLE_FONTS.find((f) => f.id === 'jakarta-sans') ||
     AVAILABLE_FONTS[4];
   const appliedFontSize = bank.fontSize || '16px';
+
+  // Helper to enter fullscreen
+  const enterFullscreen = async () => {
+    try {
+      if (!document.fullscreenElement) {
+        await document.documentElement.requestFullscreen();
+        setIsFullscreen(true);
+        setShowFullscreenRequiredModal(false);
+      }
+    } catch (e) {
+      console.warn('Fullscreen request rejected or not permitted:', e);
+    }
+  };
+
+  // 1. Enforce Fullscreen Mode while exam is active & locked
+  useEffect(() => {
+    enterFullscreen();
+
+    const handleFullscreenChange = () => {
+      const active = Boolean(document.fullscreenElement);
+      setIsFullscreen(active);
+      if (!active && !isExamCompleted && !isMinTimePassed) {
+        setShowFullscreenRequiredModal(true);
+      } else if (active) {
+        setShowFullscreenRequiredModal(false);
+      }
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+    };
+  }, [isExamCompleted, isMinTimePassed]);
+
+  // 2. Detect Tab / Window / Application Switch while locked
+  useEffect(() => {
+    if (isExamCompleted) return;
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden' && !isExamCompleted && !isMinTimePassed) {
+        setScreenSwitchCount((prev) => prev + 1);
+        setShowScreenSwitchWarning(true);
+      }
+    };
+
+    const handleWindowBlur = () => {
+      if (!isExamCompleted && !isMinTimePassed) {
+        setScreenSwitchCount((prev) => prev + 1);
+        setShowScreenSwitchWarning(true);
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('blur', handleWindowBlur);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('blur', handleWindowBlur);
+    };
+  }, [isExamCompleted, isMinTimePassed]);
+
+  // 3. Prevent page reload / close
+  useEffect(() => {
+    if (isExamCompleted) return;
+
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (!isExamCompleted) {
+        e.preventDefault();
+        e.returnValue = 'Sesi ujian sedang berlangsung dan layar dikunci!';
+        return e.returnValue;
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [isExamCompleted]);
+
+  // 4. Intercept shortcut keys that could navigate away or reload
+  useEffect(() => {
+    if (isExamCompleted) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (
+        e.key === 'F5' ||
+        ((e.ctrlKey || e.metaKey) && (e.key === 'r' || e.key === 'R')) ||
+        (e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight'))
+      ) {
+        e.preventDefault();
+        if (!isMinTimePassed) {
+          setMinDurationInfo({
+            minMinutes: minWorkingMinutes,
+            spentMinutes,
+            spentSeconds,
+            waitMinutes,
+            waitSeconds,
+          });
+          setShowMinDurationModal(true);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isExamCompleted, isMinTimePassed, minWorkingMinutes, spentMinutes, spentSeconds, waitMinutes, waitSeconds]);
 
   // Synchronize Mobile Palette drawer with browser history
   useHistoryModal({
@@ -107,25 +237,33 @@ export const ExamScreen: React.FC<ExamScreenProps> = ({
     tab: 'mulai-ujian',
   });
 
-  // Intercept back button while exam is actively in progress to prevent accidental exit
+  // 5. Intercept back button while exam is actively in progress
   useEffect(() => {
     if (isExamCompleted) return;
 
+    window.history.pushState({ tab: 'mulai-ujian', exam: true }, '');
+
     const handleExamPopState = (e: PopStateEvent) => {
-      // If user pressed back beyond exam session while exam is active
-      if (!e.state || !e.state.exam) {
-        // Re-push exam state to protect session and display confirmation modal
-        window.history.pushState(
-          { tab: 'mulai-ujian', exam: true, modal: 'exam-exit-confirm-modal' },
-          ''
-        );
+      // Re-push exam state to lock back navigation
+      window.history.pushState({ tab: 'mulai-ujian', exam: true }, '');
+
+      if (!isMinTimePassed) {
+        setMinDurationInfo({
+          minMinutes: minWorkingMinutes,
+          spentMinutes: Math.floor(elapsedSeconds / 60),
+          spentSeconds: elapsedSeconds % 60,
+          waitMinutes: Math.floor(waitRemainingSeconds / 60),
+          waitSeconds: waitRemainingSeconds % 60,
+        });
+        setShowMinDurationModal(true);
+      } else {
         setShowExitConfirmModal(true);
       }
     };
 
     window.addEventListener('popstate', handleExamPopState);
     return () => window.removeEventListener('popstate', handleExamPopState);
-  }, [isExamCompleted]);
+  }, [isExamCompleted, isMinTimePassed, minWorkingMinutes, elapsedSeconds, waitRemainingSeconds]);
 
   // Auto-save exam progress to LocalStorage for offline reliability
   useEffect(() => {
@@ -144,17 +282,18 @@ export const ExamScreen: React.FC<ExamScreenProps> = ({
     }
   }, [userAnswers, flaggedQuestions, secondsRemaining, currentIndex, bank.id, studentName, isExamCompleted]);
 
-  // Time spent tracking
-  const [startTime] = useState<number>(Date.now());
-
+  // Live timer interval (both elapsed and remaining)
   useEffect(() => {
     if (isExamCompleted) return;
 
     const timer = setInterval(() => {
+      const now = Date.now();
+      const currentElapsed = Math.max(0, Math.floor((now - startTime) / 1000));
+      setElapsedSeconds(currentElapsed);
+
       setSecondsRemaining((prev) => {
         if (prev <= 1) {
           clearInterval(timer);
-          // Auto submit when time expires if all answered, else alert
           return 0;
         }
         return prev - 1;
@@ -162,7 +301,7 @@ export const ExamScreen: React.FC<ExamScreenProps> = ({
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [isExamCompleted]);
+  }, [isExamCompleted, startTime]);
 
   const formatTimer = (totalSecs: number) => {
     const mins = Math.floor(totalSecs / 60);
@@ -194,20 +333,26 @@ export const ExamScreen: React.FC<ExamScreenProps> = ({
     }));
   };
 
+  // Click Exit Exam Button
+  const handleExitClick = () => {
+    if (!isMinTimePassed) {
+      setMinDurationInfo({
+        minMinutes: minWorkingMinutes,
+        spentMinutes,
+        spentSeconds,
+        waitMinutes,
+        waitSeconds,
+      });
+      setShowMinDurationModal(true);
+      return;
+    }
+    setShowExitConfirmModal(true);
+  };
+
   // Click Finish Exam Button
   const handleFinishClick = () => {
     // 1. Check minimum duration constraint
-    const secondsSpent = Math.max(1, Math.floor((Date.now() - startTime) / 1000));
-    const minWorkingMinutes = bank.minWorkingMinutes !== undefined ? bank.minWorkingMinutes : 30;
-    const minWorkingSeconds = minWorkingMinutes * 60;
-
-    if (minWorkingMinutes > 0 && secondsSpent < minWorkingSeconds && secondsRemaining > 0) {
-      const waitRemainingSecs = minWorkingSeconds - secondsSpent;
-      const spentMinutes = Math.floor(secondsSpent / 60);
-      const spentSeconds = secondsSpent % 60;
-      const waitMinutes = Math.floor(waitRemainingSecs / 60);
-      const waitSeconds = waitRemainingSecs % 60;
-
+    if (!isMinTimePassed) {
       setMinDurationInfo({
         minMinutes: minWorkingMinutes,
         spentMinutes,
@@ -359,7 +504,7 @@ export const ExamScreen: React.FC<ExamScreenProps> = ({
         </div>
 
         {/* Timer & Finish & Mobile Grid Toggle */}
-        <div className="flex items-center gap-2 sm:gap-4">
+        <div className="flex items-center gap-2 sm:gap-3">
           <button
             onClick={() => setShowMobilePalette(true)}
             className="md:hidden px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-indigo-300 font-bold rounded-xl text-xs border border-slate-700 flex items-center gap-1 cursor-pointer"
@@ -369,6 +514,54 @@ export const ExamScreen: React.FC<ExamScreenProps> = ({
             <span className="text-[11px] font-bold">{currentIndex + 1}/{totalQuestions}</span>
           </button>
 
+          {/* Screen Lock Status Indicator */}
+          {!isMinTimePassed ? (
+            <div
+              className="px-2.5 sm:px-3 py-1.5 bg-amber-500/10 border border-amber-500/30 rounded-xl flex items-center gap-1.5 cursor-pointer text-amber-300 hover:bg-amber-500/20 transition"
+              title={`Layar Terkunci. Sisa waktu pengerjaan minimal: ${waitMinutes}m ${waitSeconds}s`}
+              onClick={() => {
+                setMinDurationInfo({
+                  minMinutes: minWorkingMinutes,
+                  spentMinutes,
+                  spentSeconds,
+                  waitMinutes,
+                  waitSeconds,
+                });
+                setShowMinDurationModal(true);
+              }}
+            >
+              <Lock className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
+              <div className="flex flex-col text-left leading-none">
+                <span className="text-[9px] uppercase font-black tracking-wider text-amber-400">Terkunci</span>
+                <span className="font-mono text-[11px] font-bold text-amber-200">
+                  {waitMinutes.toString().padStart(2, '0')}:{waitSeconds.toString().padStart(2, '0')}
+                </span>
+              </div>
+            </div>
+          ) : (
+            <div
+              className="px-2.5 sm:px-3 py-1.5 bg-emerald-500/10 border border-emerald-500/30 rounded-xl hidden xs:flex items-center gap-1.5 text-emerald-300"
+              title="Waktu minimal pengerjaan telah terpenuhi. Anda boleh keluar atau menyelesaikan ujian."
+            >
+              <Unlock className="w-3.5 h-3.5 text-emerald-400" />
+              <span className="text-[10px] font-bold uppercase tracking-wider">Boleh Keluar</span>
+            </div>
+          )}
+
+          {/* Fullscreen Toggle */}
+          <button
+            onClick={enterFullscreen}
+            className={`p-2 rounded-xl border transition cursor-pointer ${
+              isFullscreen
+                ? 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                : 'bg-indigo-600/20 border-indigo-500/40 text-indigo-300 hover:bg-indigo-600/30'
+            }`}
+            title={isFullscreen ? 'Layar Penuh Aktif' : 'Aktifkan Layar Penuh'}
+          >
+            <Maximize2 className="w-4 h-4" />
+          </button>
+
+          {/* Countdown Timer */}
           <div className="px-2.5 sm:px-3.5 py-1.5 bg-slate-900 border border-slate-800 rounded-xl flex items-center gap-1.5">
             <Clock className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-400 animate-pulse" />
             <span className="font-mono font-bold text-xs sm:text-sm text-white tracking-wider">
@@ -385,11 +578,15 @@ export const ExamScreen: React.FC<ExamScreenProps> = ({
           </button>
 
           <button
-            onClick={() => setShowExitConfirmModal(true)}
-            className="p-2 bg-slate-900 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 rounded-xl border border-slate-800 hover:border-rose-500/30 transition cursor-pointer"
-            title="Keluar Sesi Ujian"
+            onClick={handleExitClick}
+            className={`p-2 rounded-xl border transition cursor-pointer ${
+              !isMinTimePassed
+                ? 'bg-slate-900 hover:bg-amber-500/10 text-amber-400/80 hover:text-amber-300 border-slate-800 hover:border-amber-500/30'
+                : 'bg-slate-900 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 border border-slate-800 hover:border-rose-500/30'
+            }`}
+            title={!isMinTimePassed ? `Layar Terkunci (${waitMinutes}m ${waitSeconds}s tersisa)` : 'Keluar Sesi Ujian'}
           >
-            <LogOut className="w-4 h-4" />
+            {!isMinTimePassed ? <Lock className="w-4 h-4" /> : <LogOut className="w-4 h-4" />}
           </button>
         </div>
       </header>
@@ -751,24 +948,105 @@ export const ExamScreen: React.FC<ExamScreenProps> = ({
         </div>
       )}
 
+      {/* FULLSCREEN REQUIRED LOCK MODAL */}
+      {showFullscreenRequiredModal && !isExamCompleted && !isMinTimePassed && (
+        <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="bg-[#0f172a] rounded-3xl max-w-md w-full p-6 sm:p-7 shadow-2xl space-y-4 border border-rose-500/40 text-center">
+            <div className="w-16 h-16 rounded-2xl bg-rose-500/10 text-rose-400 border border-rose-500/30 flex items-center justify-center mx-auto shadow-inner">
+              <Maximize2 className="w-8 h-8 animate-pulse" />
+            </div>
+
+            <div className="space-y-2">
+              <span className="inline-block px-3 py-1 bg-rose-500/20 text-rose-300 font-bold text-[11px] rounded-full border border-rose-500/30">
+                Layar Penuh Diwajibkan
+              </span>
+              <h3 className="text-lg font-black text-slate-100">
+                Layar Ujian Terkunci
+              </h3>
+              <p className="text-xs text-slate-300 leading-relaxed">
+                Selama sesi ujian berlangsung, Anda wajib berada dalam mode layar penuh. Layar tidak dapat diperkecil atau ditutup sebelum batas waktu minimal pengerjaan ({minWorkingMinutes} menit) terpenuhi.
+              </p>
+            </div>
+
+            <div className="p-3.5 bg-slate-900 rounded-2xl border border-slate-800 text-xs text-slate-300 flex items-center justify-between">
+              <span className="text-slate-400">Sisa Kunci Layar:</span>
+              <span className="text-rose-400 font-mono font-bold">{waitMinutes} menit {waitSeconds} detik</span>
+            </div>
+
+            <div className="pt-2">
+              <button
+                onClick={enterFullscreen}
+                className="w-full py-3.5 bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white font-black rounded-xl text-xs shadow-lg shadow-indigo-600/30 transition-all cursor-pointer tracking-wide flex items-center justify-center gap-2"
+              >
+                <Maximize2 className="w-4 h-4" />
+                <span>Masuk Kembali ke Layar Penuh</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SCREEN / TAB SWITCH WARNING MODAL */}
+      {showScreenSwitchWarning && !isExamCompleted && !isMinTimePassed && (
+        <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="bg-[#0f172a] rounded-3xl max-w-md w-full p-6 sm:p-7 shadow-2xl space-y-4 border border-amber-500/40 text-center">
+            <div className="w-16 h-16 rounded-2xl bg-amber-500/10 text-amber-400 border border-amber-500/30 flex items-center justify-center mx-auto shadow-inner">
+              <ShieldAlert className="w-8 h-8 animate-pulse" />
+            </div>
+
+            <div className="space-y-2">
+              <span className="inline-block px-3 py-1 bg-amber-500/20 text-amber-300 font-bold text-[11px] rounded-full border border-amber-500/30">
+                Peringatan Perpindahan Layar
+              </span>
+              <h3 className="text-lg font-black text-slate-100">
+                Dilarang Berpindah Layar / Tab!
+              </h3>
+              <p className="text-xs text-slate-300 leading-relaxed">
+                Sistem mendeteksi Anda mencoba beralih tab, jendela browser, atau aplikasi lain
+                {screenSwitchCount > 0 ? ` (${screenSwitchCount} kali terdeteksi)` : ''}.
+                Layar ujian dikunci dan Anda tidak diizinkan meninggalkan ruang ujian digital sebelum batas waktu minimal tercapai.
+              </p>
+            </div>
+
+            <div className="p-3.5 bg-slate-900 rounded-2xl border border-slate-800 text-xs text-slate-300 flex items-center justify-between">
+              <span className="text-slate-400">Sisa Kunci Layar:</span>
+              <span className="text-amber-400 font-mono font-bold">{waitMinutes} menit {waitSeconds} detik</span>
+            </div>
+
+            <div className="pt-2">
+              <button
+                onClick={() => {
+                  setShowScreenSwitchWarning(false);
+                  enterFullscreen();
+                }}
+                className="w-full py-3.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-xl text-xs shadow-lg shadow-amber-500/20 transition-all cursor-pointer tracking-wide flex items-center justify-center gap-2"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                <span>Saya Mengerti, Kembali Fokus Ujian</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* MINIMUM DURATION WARNING MODAL */}
       {showMinDurationModal && minDurationInfo && (
         <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in">
           <div className="bg-[#0f172a] rounded-3xl max-w-md w-full p-6 sm:p-7 shadow-2xl space-y-4 border border-amber-500/30 text-center">
             <div className="w-16 h-16 rounded-2xl bg-amber-500/10 text-amber-400 border border-amber-500/30 flex items-center justify-center mx-auto shadow-inner">
-              <Clock className="w-8 h-8 animate-pulse" />
+              <Lock className="w-8 h-8 animate-pulse" />
             </div>
 
             <div className="space-y-2">
               <span className="inline-block px-3 py-1 bg-amber-500/20 text-amber-300 font-bold text-[11px] rounded-full border border-amber-500/30">
-                Aturan Waktu Minimal Pengerjaan
+                Aturan Layar Terkunci & Waktu Minimal
               </span>
               <h3 className="text-lg font-black text-slate-100">
-                Belum Bisa Mengakhiri Ujian!
+                Belum Boleh Keluar dari Ujian!
               </h3>
               <p className="text-xs text-slate-300 leading-relaxed">
                 Paket ujian ini memiliki ketentuan waktu minimal pengerjaan selama{' '}
-                <strong className="text-amber-300 font-bold">{minDurationInfo.minMinutes} Menit</strong>.
+                <strong className="text-amber-300 font-bold">{minDurationInfo.minMinutes} Menit</strong>. Layar dikunci dan Anda tidak dapat keluar atau berpindah layar sebelum waktu tersebut terpenuhi.
               </p>
             </div>
 
@@ -781,7 +1059,7 @@ export const ExamScreen: React.FC<ExamScreenProps> = ({
                 </span>
               </div>
               <div className="flex items-center justify-between text-amber-400 font-bold pt-1 border-t border-slate-800">
-                <span>Sisa Waktu Tunggu:</span>
+                <span>Sisa Waktu Kunci Layar:</span>
                 <span className="font-mono">
                   {minDurationInfo.waitMinutes} menit {minDurationInfo.waitSeconds} detik lagi
                 </span>
@@ -789,15 +1067,19 @@ export const ExamScreen: React.FC<ExamScreenProps> = ({
             </div>
 
             <p className="text-[11px] text-slate-400 italic">
-              Silakan gunakan waktu yang tersisa untuk memeriksa kembali jawaban Anda dengan teliti.
+              Tombol keluar dan selesai ujian akan aktif secara otomatis setelah batas waktu minimal terlewati.
             </p>
 
             <div className="pt-2">
               <button
-                onClick={() => setShowMinDurationModal(false)}
-                className="w-full py-3.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-xl text-xs shadow-lg shadow-amber-500/20 transition-all cursor-pointer tracking-wide"
+                onClick={() => {
+                  setShowMinDurationModal(false);
+                  enterFullscreen();
+                }}
+                className="w-full py-3.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-xl text-xs shadow-lg shadow-amber-500/20 transition-all cursor-pointer tracking-wide flex items-center justify-center gap-2"
               >
-                Kembali Periksa Jawaban
+                <CheckCircle2 className="w-4 h-4" />
+                <span>Kembali Fokus Mengerjakan Soal</span>
               </button>
             </div>
           </div>
@@ -860,7 +1142,7 @@ export const ExamScreen: React.FC<ExamScreenProps> = ({
       )}
 
       {/* EXIT EXAM CONFIRMATION MODAL */}
-      {showExitConfirmModal && (
+      {showExitConfirmModal && isMinTimePassed && (
         <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in">
           <div className="bg-[#0f172a] rounded-3xl max-w-md w-full p-6 sm:p-7 shadow-2xl space-y-4 border border-rose-500/30 text-center">
             <div className="w-14 h-14 rounded-2xl bg-rose-500/10 text-rose-400 border border-rose-500/30 flex items-center justify-center mx-auto shadow-inner">
@@ -868,11 +1150,14 @@ export const ExamScreen: React.FC<ExamScreenProps> = ({
             </div>
 
             <div className="space-y-2">
+              <span className="inline-block px-3 py-1 bg-emerald-500/20 text-emerald-300 font-bold text-[11px] rounded-full border border-emerald-500/30">
+                Waktu Minimal ({minWorkingMinutes} Menit) Telah Terlewati
+              </span>
               <h3 className="text-lg font-black text-slate-100">
                 Keluar dari Sesi Ujian?
               </h3>
               <p className="text-xs text-slate-300 leading-relaxed">
-                Jawaban Anda telah tersimpan secara otomatis di memori perangkat. Apakah Anda yakin ingin menghentikan sesi ujian ini?
+                Jawaban Anda telah tersimpan secara otomatis di memori perangkat. Apakah Anda yakin ingin keluar dari sesi ujian sekarang?
               </p>
             </div>
 
@@ -888,6 +1173,9 @@ export const ExamScreen: React.FC<ExamScreenProps> = ({
                 type="button"
                 onClick={() => {
                   setShowExitConfirmModal(false);
+                  if (document.fullscreenElement) {
+                    document.exitFullscreen().catch(() => {});
+                  }
                   onExitExam();
                 }}
                 className="flex-1 py-3 bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white font-bold rounded-xl text-xs shadow-lg shadow-rose-600/20 transition-all cursor-pointer"

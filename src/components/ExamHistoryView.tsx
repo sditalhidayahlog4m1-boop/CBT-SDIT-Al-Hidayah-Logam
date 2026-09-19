@@ -1,8 +1,28 @@
 import React, { useState, useMemo } from 'react';
-import { History, Download, Eye, Search, Trash2, Award, CheckCircle2, XCircle, Filter, BookOpen, GraduationCap, User } from 'lucide-react';
+import {
+  History,
+  Download,
+  Eye,
+  Search,
+  Trash2,
+  Award,
+  CheckCircle2,
+  XCircle,
+  Filter,
+  BookOpen,
+  GraduationCap,
+  User,
+  ChevronLeft,
+  ChevronRight,
+  CheckSquare,
+} from 'lucide-react';
 import { ExamResult, QuestionBank, AuthUser } from '../types';
 import { exportExamResultsExcel } from '../utils/exportImport';
-import { deleteExamResultFromFirestore, clearAllExamResultsInFirestore } from '../utils/firebaseSync';
+import {
+  deleteExamResultFromFirestore,
+  deleteExamResultsBulkFromFirestore,
+  clearAllExamResultsInFirestore,
+} from '../utils/firebaseSync';
 import { ConfirmModal, ToastContainer, ToastMessage } from './NotificationModal';
 import { useHistoryModal } from '../utils/navigationHistory';
 
@@ -115,6 +135,47 @@ export const ExamHistoryView: React.FC<ExamHistoryViewProps> = ({
 
   const [deleteConfirmTarget, setDeleteConfirmTarget] = useState<ExamResult | null>(null);
   const [showClearAllModal, setShowClearAllModal] = useState<boolean>(false);
+  const [showBulkDeleteModal, setShowBulkDeleteModal] = useState<boolean>(false);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [itemsPerPage, setItemsPerPage] = useState<number>(20);
+  const pageSizeOptions = [10, 20, 50, 100, 200, 500];
+
+  // Pagination calculation
+  const totalPages = Math.max(1, Math.ceil(filtered.length / itemsPerPage));
+  const paginatedResults = useMemo(() => {
+    const start = (currentPage - 1) * itemsPerPage;
+    return filtered.slice(start, start + itemsPerPage);
+  }, [filtered, currentPage, itemsPerPage]);
+
+  // Selection states & helpers
+  const isAllFilteredSelected = filtered.length > 0 && filtered.every((r) => selectedIds.includes(r.id));
+  const isAllPageSelected = paginatedResults.length > 0 && paginatedResults.every((r) => selectedIds.includes(r.id));
+
+  const toggleSelectAllFiltered = () => {
+    if (isAllFilteredSelected) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(filtered.map((r) => r.id));
+    }
+  };
+
+  const toggleSelectPage = () => {
+    if (isAllPageSelected) {
+      const pageIds = new Set(paginatedResults.map((r) => r.id));
+      setSelectedIds((prev) => prev.filter((id) => !pageIds.has(id)));
+    } else {
+      const pageIds = paginatedResults.map((r) => r.id);
+      setSelectedIds((prev) => Array.from(new Set([...prev, ...pageIds])));
+    }
+  };
+
+  const toggleSelectResult = (id: string) => {
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    );
+  };
+
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
   const addToast = (type: 'success' | 'error' | 'warning' | 'info', message: string, title?: string) => {
@@ -140,16 +201,36 @@ export const ExamHistoryView: React.FC<ExamHistoryViewProps> = ({
     const studentName = deleteConfirmTarget.studentName;
     const targetId = deleteConfirmTarget.id;
     setResults((prev) => prev.filter((r) => r.id !== targetId));
+    setSelectedIds((prev) => prev.filter((id) => id !== targetId));
     await deleteExamResultFromFirestore(targetId);
     if (selectedResult?.id === targetId) setSelectedResult(null);
     setDeleteConfirmTarget(null);
     addToast('success', `Riwayat ujian "${studentName}" berhasil dihapus permanen dari Firebase.`, 'Berhasil Dihapus');
   };
 
+  const executeBulkDelete = async () => {
+    if (isStudent || selectedIds.length === 0) return;
+    const count = selectedIds.length;
+    const idSet = new Set(selectedIds);
+    setResults((prev) => prev.filter((r) => !idSet.has(r.id)));
+    if (selectedResult && idSet.has(selectedResult.id)) {
+      setSelectedResult(null);
+    }
+    await deleteExamResultsBulkFromFirestore(selectedIds);
+    setSelectedIds([]);
+    setShowBulkDeleteModal(false);
+    addToast(
+      'success',
+      `Sebanyak ${count} riwayat ujian siswa berhasil dihapus permanen dari Firebase.`,
+      'Berhasil Dihapus Massal'
+    );
+  };
+
   const executeClearAll = async () => {
     // Only teachers/admins are allowed to clear all
     if (isStudent) return;
     setResults([]);
+    setSelectedIds([]);
     await clearAllExamResultsInFirestore();
     setShowClearAllModal(false);
     setSelectedResult(null);
@@ -467,12 +548,68 @@ export const ExamHistoryView: React.FC<ExamHistoryViewProps> = ({
         </div>
       )}
 
+      {/* Floating Bulk Action Bar for Checkbox Deletion */}
+      {!isStudent && selectedIds.length > 0 && (
+        <div className="p-3 sm:p-4 bg-gradient-to-r from-rose-950/70 via-indigo-950/70 to-slate-900/90 border border-rose-500/40 rounded-2xl flex flex-wrap items-center justify-between gap-3 shadow-xl backdrop-blur-sm">
+          <div className="flex items-center gap-3">
+            <span className="flex h-3 w-3 relative">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-3 w-3 bg-rose-500"></span>
+            </span>
+            <div>
+              <span className="text-xs font-bold text-slate-100 block">
+                <strong className="text-rose-300 text-sm font-black">{selectedIds.length}</strong> data riwayat ujian dipilih
+              </span>
+              <span className="text-[11px] text-slate-400">
+                Gunakan centang kotak untuk menghapus riwayat yang menumpuk agar data lebih bersih & segar.
+              </span>
+            </div>
+            {filtered.length > selectedIds.length && (
+              <button
+                onClick={toggleSelectAllFiltered}
+                className="text-xs font-bold text-indigo-300 hover:text-white underline cursor-pointer ml-1"
+                title="Pilih seluruh riwayat yang terfilter"
+              >
+                Pilih Semua ({filtered.length})
+              </button>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setSelectedIds([])}
+              className="px-3 py-1.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-300 text-xs font-bold border border-slate-700 cursor-pointer transition-colors"
+            >
+              Batalkan Pilihan
+            </button>
+            <button
+              onClick={() => setShowBulkDeleteModal(true)}
+              className="px-4 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 active:scale-95 text-white text-xs font-black flex items-center gap-1.5 shadow-lg shadow-rose-600/30 cursor-pointer transition-all"
+              title="Hapus data riwayat ujian yang dipilih secara permanen"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Hapus Terpilih ({selectedIds.length})</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Table Section */}
       <div className="bg-[#0f172a] rounded-2xl border border-slate-800 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead className="bg-slate-950 text-slate-300 font-bold uppercase tracking-wider border-b border-slate-800">
               <tr>
+                {!isStudent && (
+                  <th className="p-3.5 w-10 text-center">
+                    <input
+                      type="checkbox"
+                      checked={isAllFilteredSelected}
+                      onChange={toggleSelectAllFiltered}
+                      className="w-4 h-4 rounded border-slate-700 text-rose-500 focus:ring-rose-400 bg-slate-900 cursor-pointer"
+                      title="Pilih / Batalkan Semua Riwayat Ujian"
+                    />
+                  </th>
+                )}
                 <th className="p-3.5 w-12 text-center">No</th>
                 <th className="p-3.5">Tanggal & Waktu</th>
                 {/* For Teachers/Admins: show Student Name and Class */}
@@ -491,66 +628,88 @@ export const ExamHistoryView: React.FC<ExamHistoryViewProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60 text-slate-300">
-              {filtered.map((r, idx) => (
-                <tr key={r.id} className="hover:bg-slate-800/40 transition-colors">
-                  <td className="p-3.5 text-center font-bold text-slate-500">{idx + 1}</td>
-                  <td className="p-3.5 text-slate-400 font-mono text-[11px] whitespace-nowrap">{r.date}</td>
-                  {/* For Teachers/Admins: display student name & class */}
-                  {!isStudent && (
-                    <>
-                      <td className="p-3.5 font-bold text-slate-100">{r.studentName}</td>
-                      <td className="p-3.5 text-slate-400">{r.classRoom}</td>
-                    </>
-                  )}
-                  <td className="p-3.5">
-                    <span className="font-bold text-indigo-400 block">{r.subject}</span>
-                    {r.examTitle && r.examTitle !== r.subject && (
-                      <span className="text-[11px] text-slate-400 block">{r.examTitle}</span>
-                    )}
-                  </td>
-                  {isStudent && (
-                    <td className="p-3.5 font-mono text-[11px] text-slate-400">{r.token}</td>
-                  )}
-                  <td className="p-3.5 text-center font-black text-indigo-300 text-sm">
-                    {r.score}
-                  </td>
-                  <td className="p-3.5 text-center text-slate-400">{r.durationSpent}</td>
-                  <td className="p-3.5 text-center">
-                    <span
-                      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${
-                        r.passed
-                          ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
-                          : 'bg-rose-500/10 text-rose-400 border-rose-500/20'
-                      }`}
-                    >
-                      {r.passed ? 'LULUS' : 'REMEDIAL'}
-                    </span>
-                  </td>
-                  <td className="p-3.5 text-center space-x-1">
-                    <button
-                      onClick={() => setSelectedResult(r)}
-                      className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-md transition-colors border border-slate-700 cursor-pointer"
-                      title="Lihat Detail Jawaban"
-                    >
-                      <Eye className="w-3.5 h-3.5" />
-                    </button>
-                    {/* Delete button is ONLY rendered for Guru and Admin */}
+              {paginatedResults.map((r, idx) => {
+                const isSelected = selectedIds.includes(r.id);
+                const rowNumber = (currentPage - 1) * itemsPerPage + idx + 1;
+                return (
+                  <tr
+                    key={r.id}
+                    className={`transition-colors ${
+                      isSelected
+                        ? 'bg-rose-950/20 hover:bg-rose-950/30 border-l-2 border-rose-500'
+                        : 'hover:bg-slate-800/40'
+                    }`}
+                  >
                     {!isStudent && (
-                      <button
-                        onClick={() => handleDeleteClick(r)}
-                        className="p-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-md transition-colors border border-rose-500/20 cursor-pointer"
-                        title="Hapus Record"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      <td className="p-3.5 text-center">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => toggleSelectResult(r.id)}
+                          className="w-4 h-4 rounded border-slate-700 text-rose-500 focus:ring-rose-400 bg-slate-900 cursor-pointer"
+                          title="Pilih data riwayat ini"
+                        />
+                      </td>
                     )}
-                  </td>
-                </tr>
-              ))}
+                    <td className="p-3.5 text-center font-bold text-slate-500">{rowNumber}</td>
+                    <td className="p-3.5 text-slate-400 font-mono text-[11px] whitespace-nowrap">{r.date}</td>
+                    {/* For Teachers/Admins: display student name & class */}
+                    {!isStudent && (
+                      <>
+                        <td className="p-3.5 font-bold text-slate-100">{r.studentName}</td>
+                        <td className="p-3.5 text-slate-400">{r.classRoom}</td>
+                      </>
+                    )}
+                    <td className="p-3.5">
+                      <span className="font-bold text-indigo-400 block">{r.subject}</span>
+                      {r.examTitle && r.examTitle !== r.subject && (
+                        <span className="text-[11px] text-slate-400 block">{r.examTitle}</span>
+                      )}
+                    </td>
+                    {isStudent && (
+                      <td className="p-3.5 font-mono text-[11px] text-slate-400">{r.token}</td>
+                    )}
+                    <td className="p-3.5 text-center font-black text-indigo-300 text-sm">
+                      {r.score}
+                    </td>
+                    <td className="p-3.5 text-center text-slate-400">{r.durationSpent}</td>
+                    <td className="p-3.5 text-center">
+                      <span
+                        className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${
+                          r.passed
+                            ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                            : 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+                        }`}
+                      >
+                        {r.passed ? 'LULUS' : 'REMEDIAL'}
+                      </span>
+                    </td>
+                    <td className="p-3.5 text-center space-x-1">
+                      <button
+                        onClick={() => setSelectedResult(r)}
+                        className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-md transition-colors border border-slate-700 cursor-pointer"
+                        title="Lihat Detail Jawaban"
+                      >
+                        <Eye className="w-3.5 h-3.5" />
+                      </button>
+                      {/* Delete button is ONLY rendered for Guru and Admin */}
+                      {!isStudent && (
+                        <button
+                          onClick={() => handleDeleteClick(r)}
+                          className="p-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-md transition-colors border border-rose-500/20 cursor-pointer"
+                          title="Hapus Record"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
               {filtered.length === 0 && (
                 <tr>
                   <td
-                    colSpan={isStudent ? 7 : 9}
+                    colSpan={isStudent ? 7 : 10}
                     className="p-8 text-center text-slate-500 text-xs"
                   >
                     {isStudent
@@ -562,6 +721,55 @@ export const ExamHistoryView: React.FC<ExamHistoryViewProps> = ({
             </tbody>
           </table>
         </div>
+
+        {/* Table Footer with Pagination */}
+        {filtered.length > 0 && (
+          <div className="p-4 bg-slate-950/80 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-400">
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-800 rounded-lg px-2 py-0.5">
+                <span className="text-[11px] text-slate-400">Baris per halaman:</span>
+                <select
+                  value={itemsPerPage}
+                  onChange={(e) => {
+                    setItemsPerPage(Number(e.target.value));
+                    setCurrentPage(1);
+                  }}
+                  className="bg-transparent text-xs font-bold text-indigo-300 border-none outline-none cursor-pointer pr-1"
+                >
+                  {pageSizeOptions.map((sz) => (
+                    <option key={sz} value={sz} className="bg-slate-900 text-slate-200">
+                      {sz}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {totalPages > 1 && (
+              <div className="flex items-center gap-1.5">
+                <button
+                  disabled={currentPage === 1}
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  className="p-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                  title="Halaman Sebelumnya"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <span className="px-3 py-1 font-bold text-slate-200">
+                  Halaman {currentPage} dari {totalPages}
+                </span>
+                <button
+                  disabled={currentPage === totalPages}
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  className="p-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                  title="Halaman Selanjutnya"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Detail Modal */}
@@ -706,6 +914,18 @@ export const ExamHistoryView: React.FC<ExamHistoryViewProps> = ({
         type="danger"
         onConfirm={executeDelete}
         onCancel={() => setDeleteConfirmTarget(null)}
+      />
+
+      {/* Confirmation Modal - Bulk Delete Selected Records */}
+      <ConfirmModal
+        isOpen={showBulkDeleteModal}
+        title="Hapus Riwayat Ujian Terpilih"
+        message={`Apakah Anda yakin ingin menghapus ${selectedIds.length} data riwayat ujian siswa yang dicentang? Seluruh data yang dipilih akan dihapus secara permanen dari database Firebase Firestore agar riwayat tetap bersih dan tidak menumpuk.`}
+        confirmText={`Ya, Hapus ${selectedIds.length} Riwayat Terpilih`}
+        cancelText="Batal"
+        type="danger"
+        onConfirm={executeBulkDelete}
+        onCancel={() => setShowBulkDeleteModal(false)}
       />
 
       {/* Confirmation Modal - Clear All Records */}

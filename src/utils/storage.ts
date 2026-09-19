@@ -44,7 +44,14 @@ export interface AdminAccount {
 export function getStoredAdminAccount(): AdminAccount {
   try {
     const saved = localStorage.getItem('cbt_admin_account');
-    if (saved) return JSON.parse(saved);
+    if (saved) {
+      const acc = JSON.parse(saved);
+      if (acc && acc.name && acc.name.trim().toLowerCase() === 'administrator') {
+        acc.name = 'Administrator System';
+        localStorage.setItem('cbt_admin_account', JSON.stringify(acc));
+      }
+      return acc;
+    }
   } catch (e) {
     // ignore
   }
@@ -319,7 +326,11 @@ export function getStoredLoginLogs(): UserLoginLog[] {
   try {
     const data = localStorage.getItem('cbt_login_logs');
     if (!data) return [];
-    return JSON.parse(data) || [];
+    const parsed: UserLoginLog[] = JSON.parse(data) || [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (l) => l && l.name && l.name.trim().toLowerCase() !== 'administrator'
+    );
   } catch {
     return [];
   }
@@ -327,7 +338,10 @@ export function getStoredLoginLogs(): UserLoginLog[] {
 
 export function saveStoredLoginLogs(logs: UserLoginLog[]) {
   try {
-    localStorage.setItem('cbt_login_logs', JSON.stringify(logs));
+    const cleaned = (logs || []).filter(
+      (l) => l && l.name && l.name.trim().toLowerCase() !== 'administrator'
+    );
+    localStorage.setItem('cbt_login_logs', JSON.stringify(cleaned));
   } catch {
     // ignore
   }

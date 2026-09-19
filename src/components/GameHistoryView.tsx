@@ -28,6 +28,7 @@ import { GameHistoryLog, AuthUser } from '../types';
 import { getStoredGameLogs } from '../utils/storage';
 import { useHistoryModal } from '../utils/navigationHistory';
 import { ConfirmModal, ToastContainer, ToastMessage } from './NotificationModal';
+import { deleteGameLogsBulkFromFirestore } from '../utils/firebaseSync';
 
 interface GameHistoryViewProps {
   gameLogs: GameHistoryLog[];
@@ -35,6 +36,7 @@ interface GameHistoryViewProps {
   currentUser?: AuthUser | null;
   onClearLogs?: () => void;
   onDeleteLog?: (id: string) => void;
+  onDeleteLogsBulk?: (ids: string[]) => void;
   onRefresh?: () => Promise<boolean | void> | void;
 }
 
@@ -44,6 +46,7 @@ export const GameHistoryView: React.FC<GameHistoryViewProps> = ({
   currentUser,
   onClearLogs,
   onDeleteLog,
+  onDeleteLogsBulk,
   onRefresh,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
@@ -68,6 +71,8 @@ export const GameHistoryView: React.FC<GameHistoryViewProps> = ({
   const [lastSyncTime, setLastSyncTime] = useState<string>('');
   const [refreshSuccessMessage, setRefreshSuccessMessage] = useState<string | null>(null);
   const [deleteConfirmTarget, setDeleteConfirmTarget] = useState<GameHistoryLog | null>(null);
+  const [showBulkDeleteModal, setShowBulkDeleteModal] = useState<boolean>(false);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
   const addToast = (type: 'success' | 'error' | 'warning' | 'info', message: string, title?: string) => {
@@ -270,6 +275,23 @@ export const GameHistoryView: React.FC<GameHistoryViewProps> = ({
     return { totalPlayed, avgScore, maxScore, uniqueStudents };
   }, [filteredLogs]);
 
+  // Bulk selection states and helpers
+  const isAllFilteredSelected = filteredLogs.length > 0 && filteredLogs.every((l) => selectedIds.includes(l.id));
+
+  const toggleSelectAllFiltered = () => {
+    if (isAllFilteredSelected) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(filteredLogs.map((l) => l.id));
+    }
+  };
+
+  const toggleSelectLog = (id: string) => {
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    );
+  };
+
   // Delete single log entry with confirmation
   const handleDeleteClick = (log: GameHistoryLog) => {
     setDeleteConfirmTarget(log);
@@ -284,8 +306,33 @@ export const GameHistoryView: React.FC<GameHistoryViewProps> = ({
     } else if (setGameLogs) {
       setGameLogs((prev) => prev.filter((item) => item.id !== targetId));
     }
+    setSelectedIds((prev) => prev.filter((id) => id !== targetId));
     setDeleteConfirmTarget(null);
     addToast('success', `Riwayat game milik "${targetName}" berhasil dihapus secara permanen dari Firebase.`, 'Berhasil Dihapus');
+  };
+
+  // Execute bulk delete
+  const executeBulkDelete = async () => {
+    if (isStudent || selectedIds.length === 0) return;
+    const count = selectedIds.length;
+    const idSet = new Set(selectedIds);
+
+    if (onDeleteLogsBulk) {
+      onDeleteLogsBulk(selectedIds);
+    } else {
+      if (setGameLogs) {
+        setGameLogs((prev) => prev.filter((item) => !idSet.has(item.id)));
+      }
+      await deleteGameLogsBulkFromFirestore(selectedIds);
+    }
+
+    setSelectedIds([]);
+    setShowBulkDeleteModal(false);
+    addToast(
+      'success',
+      `Sebanyak ${count} riwayat game siswa berhasil dihapus secara permanen dari Firebase.`,
+      'Berhasil Dihapus Massal'
+    );
   };
 
   // Clear all game history logs
@@ -295,6 +342,7 @@ export const GameHistoryView: React.FC<GameHistoryViewProps> = ({
     } else if (setGameLogs) {
       setGameLogs([]);
     }
+    setSelectedIds([]);
     setShowConfirmResetModal(false);
     addToast('success', 'Seluruh catatan riwayat game siswa berhasil dibersihkan permanen dari Firebase Firestore.', 'Berhasil Dikosongkan');
   };
@@ -753,6 +801,51 @@ export const GameHistoryView: React.FC<GameHistoryViewProps> = ({
         </div>
       </div>
 
+      {/* Floating Bulk Action Bar for Checkbox Deletion */}
+      {!isStudent && selectedIds.length > 0 && (
+        <div className="p-3 sm:p-4 bg-gradient-to-r from-rose-950/70 via-amber-950/50 to-slate-900/90 border border-rose-500/40 rounded-2xl flex flex-wrap items-center justify-between gap-3 shadow-xl backdrop-blur-sm">
+          <div className="flex items-center gap-3">
+            <span className="flex h-3 w-3 relative">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-3 w-3 bg-rose-500"></span>
+            </span>
+            <div>
+              <span className="text-xs font-bold text-slate-100 block">
+                <strong className="text-rose-300 text-sm font-black">{selectedIds.length}</strong> data riwayat game dipilih
+              </span>
+              <span className="text-[11px] text-slate-400">
+                Gunakan centang kotak untuk menghapus riwayat game yang menumpuk agar data lebih segar.
+              </span>
+            </div>
+            {filteredLogs.length > selectedIds.length && (
+              <button
+                onClick={toggleSelectAllFiltered}
+                className="text-xs font-bold text-amber-300 hover:text-white underline cursor-pointer ml-1"
+                title="Pilih seluruh riwayat game yang terfilter"
+              >
+                Pilih Semua ({filteredLogs.length})
+              </button>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setSelectedIds([])}
+              className="px-3 py-1.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-300 text-xs font-bold border border-slate-700 cursor-pointer transition-colors"
+            >
+              Batalkan Pilihan
+            </button>
+            <button
+              onClick={() => setShowBulkDeleteModal(true)}
+              className="px-4 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 active:scale-95 text-white text-xs font-black flex items-center gap-1.5 shadow-lg shadow-rose-600/30 cursor-pointer transition-all"
+              title="Hapus data riwayat game yang dipilih secara permanen"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Hapus Terpilih ({selectedIds.length})</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Main Table Container */}
       <div className="bg-[#0b132b] rounded-2xl border border-amber-500/30 shadow-2xl overflow-hidden">
         <div className="p-4 bg-slate-900/80 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -804,6 +897,17 @@ export const GameHistoryView: React.FC<GameHistoryViewProps> = ({
             <table className="w-full text-left text-xs text-slate-200 border-collapse">
               <thead>
                 <tr className="bg-slate-900/90 text-slate-400 border-b border-slate-800 font-bold uppercase text-[10px] tracking-wider">
+                  {!isStudent && (
+                    <th className="py-3 px-3 w-10 text-center">
+                      <input
+                        type="checkbox"
+                        checked={isAllFilteredSelected}
+                        onChange={toggleSelectAllFiltered}
+                        className="w-4 h-4 rounded border-slate-700 text-rose-500 focus:ring-rose-400 bg-slate-950 cursor-pointer"
+                        title="Pilih / Batalkan Semua Riwayat Game"
+                      />
+                    </th>
+                  )}
                   <th className="py-3 px-4 w-12 text-center">No</th>
                   <th className="py-3 px-4">Waktu Main</th>
                   <th className="py-3 px-4">Nama Siswa / Pengguna</th>
@@ -818,6 +922,7 @@ export const GameHistoryView: React.FC<GameHistoryViewProps> = ({
               </thead>
               <tbody className="divide-y divide-slate-800/60">
                 {paginatedLogs.map((log, index) => {
+                  const isSelected = selectedIds.includes(log.id);
                   const isHighScore = log.score >= 80;
                   const isMediumScore = log.score >= 60 && log.score < 80;
                   const diff = log.difficulty || 'Sedang';
@@ -826,8 +931,23 @@ export const GameHistoryView: React.FC<GameHistoryViewProps> = ({
                   return (
                     <tr
                       key={log.id || index}
-                      className="hover:bg-slate-800/40 transition-colors"
+                      className={`transition-colors ${
+                        isSelected
+                          ? 'bg-rose-950/20 hover:bg-rose-950/30 border-l-2 border-rose-500'
+                          : 'hover:bg-slate-800/40'
+                      }`}
                     >
+                      {!isStudent && (
+                        <td className="py-3 px-3 text-center">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => toggleSelectLog(log.id)}
+                            className="w-4 h-4 rounded border-slate-700 text-rose-500 focus:ring-rose-400 bg-slate-950 cursor-pointer"
+                            title="Pilih riwayat game ini"
+                          />
+                        </td>
+                      )}
                       <td className="py-3 px-4 text-center font-mono text-slate-400">
                         {rowNumber}
                       </td>
@@ -938,16 +1058,8 @@ export const GameHistoryView: React.FC<GameHistoryViewProps> = ({
         {filteredLogs.length > 0 && (
           <div className="p-4 bg-slate-900/90 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-400">
             <div className="flex items-center gap-3">
-              <div>
-                Menampilkan{' '}
-                <span className="font-bold text-slate-200">
-                  {Math.min((currentPage - 1) * itemsPerPage + 1, filteredLogs.length)} -{' '}
-                  {Math.min(currentPage * itemsPerPage, filteredLogs.length)}
-                </span>{' '}
-                dari <span className="font-bold text-slate-200">{filteredLogs.length}</span> entri
-              </div>
               <div className="flex items-center gap-1.5 bg-slate-950/80 border border-slate-800 rounded-lg px-2 py-0.5">
-                <span className="text-[11px] text-slate-400">Baris:</span>
+                <span className="text-[11px] text-slate-400">Baris per halaman:</span>
                 <select
                   value={itemsPerPage}
                   onChange={(e) => {
@@ -1034,6 +1146,18 @@ export const GameHistoryView: React.FC<GameHistoryViewProps> = ({
         type="danger"
         onConfirm={executeDelete}
         onCancel={() => setDeleteConfirmTarget(null)}
+      />
+
+      {/* Modal Konfirmasi Hapus Massal Terpilih Riwayat Game */}
+      <ConfirmModal
+        isOpen={showBulkDeleteModal}
+        title="Konfirmasi Hapus Riwayat Game Terpilih"
+        message={`Apakah Anda yakin ingin menghapus ${selectedIds.length} data riwayat game yang dicentang? Seluruh data terpilih akan dihapus secara permanen dari database Firebase Firestore agar riwayat game tetap bersih dan tidak menumpuk.`}
+        confirmText={`Ya, Hapus ${selectedIds.length} Riwayat Terpilih`}
+        cancelText="Batal"
+        type="danger"
+        onConfirm={executeBulkDelete}
+        onCancel={() => setShowBulkDeleteModal(false)}
       />
 
       {/* Floating Notifications / Toasts */}
