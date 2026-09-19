@@ -11,6 +11,7 @@ import {
   onSnapshot,
   query,
   where,
+  limit,
   updateDoc,
   deleteField,
   Firestore,
@@ -30,6 +31,64 @@ import {
 import { SchoolProfile, AdminAccount } from './storage';
 import { normalizeExamResults, getExamResultTimestamp } from './dateUtils';
 import firebaseConfigRaw from '../../firebase-applet-config.json';
+
+// Firestore Quota / Resource-Exhausted Circuit Breaker
+let isQuotaExhausted = false;
+let quotaExhaustedUntil = 0;
+const QUOTA_COOLDOWN_MS = 15 * 60 * 1000; // 15 minutes cooldown
+
+try {
+  const savedQuotaExpiry = localStorage.getItem('cbt_firestore_quota_until');
+  if (savedQuotaExpiry) {
+    const expiry = parseInt(savedQuotaExpiry, 10);
+    if (expiry > Date.now()) {
+      isQuotaExhausted = true;
+      quotaExhaustedUntil = expiry;
+    } else {
+      localStorage.removeItem('cbt_firestore_quota_until');
+    }
+  }
+} catch {}
+
+export function isFirestoreQuotaExhausted(): boolean {
+  if (!isQuotaExhausted) return false;
+  if (Date.now() > quotaExhaustedUntil) {
+    isQuotaExhausted = false;
+    try {
+      localStorage.removeItem('cbt_firestore_quota_until');
+    } catch {}
+    return false;
+  }
+  return true;
+}
+
+export function markFirestoreQuotaExhausted(err?: any) {
+  isQuotaExhausted = true;
+  quotaExhaustedUntil = Date.now() + QUOTA_COOLDOWN_MS;
+  try {
+    localStorage.setItem('cbt_firestore_quota_until', String(quotaExhaustedUntil));
+  } catch {}
+  console.warn(
+    '[Firestore Circuit Breaker] Batas kuota Firestore terlampaui (resource-exhausted / quota exceeded). ' +
+    'Sistem CBT beralih ke mode offline lokal yang 100% aman dan lancar.'
+  );
+}
+
+export function checkAndHandleFirestoreError(err: any): boolean {
+  if (!err) return false;
+  const errMsg = String(err?.message || err?.code || err);
+  if (
+    err?.code === 'resource-exhausted' ||
+    errMsg.includes('resource-exhausted') ||
+    errMsg.includes('Quota exceeded') ||
+    errMsg.includes('quota exceeded') ||
+    errMsg.includes('Resource has been exhausted')
+  ) {
+    markFirestoreQuotaExhausted(err);
+    return true;
+  }
+  return false;
+}
 
 // Local sets of IDs permanently deleted by user to prevent stale read race conditions
 const locallyDeletedLogIds = new Set<string>();
@@ -103,6 +162,7 @@ export interface AppData {
 let firestoreDb: Firestore | null = null;
 
 export function getFirestoreDb(): Firestore | null {
+  if (isFirestoreQuotaExhausted()) return null;
   if (firestoreDb) return firestoreDb;
 
   try {
@@ -154,15 +214,28 @@ export const LOGIN_LOGS_COLLECTION = 'login_logs';
  * - Separate collections (exam_results, game_logs, login_logs)
  */
 export async function fetchAppDataFromFirestore(silent = true): Promise<AppData | null> {
+  if (isFirestoreQuotaExhausted()) return null;
   const db = getFirestoreDb();
   if (!db) return null;
 
   try {
     const mainDocRef = doc(db, MAIN_COLLECTION, MAIN_DOCUMENT);
-    const mainSnapPromise = getDoc(mainDocRef);
-    const resultsSnapPromise = getDocs(collection(db, EXAM_RESULTS_COLLECTION)).catch(() => null);
-    const gameLogsSnapPromise = getDocs(collection(db, GAME_LOGS_COLLECTION)).catch(() => null);
-    const loginLogsSnapPromise = getDocs(collection(db, LOGIN_LOGS_COLLECTION)).catch(() => null);
+    const mainSnapPromise = getDoc(mainDocRef).catch((err) => {
+      checkAndHandleFirestoreError(err);
+      return null;
+    });
+    const resultsSnapPromise = getDocs(query(collection(db, EXAM_RESULTS_COLLECTION), limit(100))).catch((err) => {
+      checkAndHandleFirestoreError(err);
+      return null;
+    });
+    const gameLogsSnapPromise = getDocs(query(collection(db, GAME_LOGS_COLLECTION), limit(50))).catch((err) => {
+      checkAndHandleFirestoreError(err);
+      return null;
+    });
+    const loginLogsSnapPromise = getDocs(query(collection(db, LOGIN_LOGS_COLLECTION), limit(50))).catch((err) => {
+      checkAndHandleFirestoreError(err);
+      return null;
+    });
 
     const [mainSnap, resultsSnap, gameLogsSnap, loginLogsSnap] = await Promise.all([
       mainSnapPromise,
@@ -173,7 +246,7 @@ export async function fetchAppDataFromFirestore(silent = true): Promise<AppData 
 
     let data: AppData = {};
 
-    if (mainSnap.exists()) {
+    if (mainSnap && mainSnap.exists()) {
       data = mainSnap.data() as AppData;
     }
 
@@ -274,6 +347,7 @@ export async function fetchAppDataFromFirestore(silent = true): Promise<AppData 
 
     return data;
   } catch (err: any) {
+    checkAndHandleFirestoreError(err);
     if (!silent) {
       console.warn('[Firestore] Notice fetching app data:', err?.message || err);
     }
@@ -284,8 +358,10 @@ export async function fetchAppDataFromFirestore(silent = true): Promise<AppData 
 /**
  * Save master data to Firestore (app_data/main).
  * Automatically excludes high-volume items (results, gameLogs, loginLogs) from bloating main document.
+ * Only writes master data to a single document to conserve Firestore quota.
  */
 export async function saveAppDataToFirestore(data: Partial<AppData>): Promise<boolean> {
+  if (isFirestoreQuotaExhausted()) return false;
   const db = getFirestoreDb();
   if (!db) return false;
 
@@ -305,42 +381,9 @@ export async function saveAppDataToFirestore(data: Partial<AppData>): Promise<bo
     };
 
     await setDoc(docRef, payload, { merge: true });
-
-    // If results are explicitly provided in payload, save each individually to exam_results collection
-    if (Array.isArray(results) && results.length > 0) {
-      const batch = writeBatch(db);
-      results.slice(0, 100).forEach((r) => {
-        if (r && r.id) {
-          batch.set(doc(db, EXAM_RESULTS_COLLECTION, r.id), r, { merge: true });
-        }
-      });
-      await batch.commit().catch(() => {});
-    }
-
-    // If gameLogs are explicitly provided, save individually to game_logs collection
-    if (Array.isArray(gameLogs) && gameLogs.length > 0) {
-      const batch = writeBatch(db);
-      gameLogs.slice(0, 100).forEach((g) => {
-        if (g && g.id) {
-          batch.set(doc(db, GAME_LOGS_COLLECTION, g.id), g, { merge: true });
-        }
-      });
-      await batch.commit().catch(() => {});
-    }
-
-    // If loginLogs are explicitly provided, save individually to login_logs collection
-    if (Array.isArray(loginLogs) && loginLogs.length > 0) {
-      const batch = writeBatch(db);
-      loginLogs.slice(0, 100).forEach((l) => {
-        if (l && l.id && (!l.name || l.name.trim().toLowerCase() !== 'administrator')) {
-          batch.set(doc(db, LOGIN_LOGS_COLLECTION, l.id), l, { merge: true });
-        }
-      });
-      await batch.commit().catch(() => {});
-    }
-
     return true;
   } catch (err: any) {
+    checkAndHandleFirestoreError(err);
     console.warn('[Firestore] Notice saving master data to cloud:', err?.message || err);
     return false;
   }
@@ -353,6 +396,7 @@ export function subscribeToAppData(
   onData: (data: AppData, isLocalWrite: boolean) => void,
   onError?: (err: Error) => void
 ): Unsubscribe | null {
+  if (isFirestoreQuotaExhausted()) return null;
   const db = getFirestoreDb();
   if (!db) return null;
 
@@ -361,8 +405,10 @@ export function subscribeToAppData(
     let currentResults: ExamResult[] = [];
     let currentGameLogs: GameHistoryLog[] = [];
     let currentLoginLogs: UserLoginLog[] = [];
+    let isCleanedUp = false;
 
     const emitConsolidated = (isLocalWrite: boolean) => {
+      if (isCleanedUp) return;
       const consolidated: AppData = {
         ...currentMaster,
         results: currentResults,
@@ -372,8 +418,30 @@ export function subscribeToAppData(
       onData(consolidated, isLocalWrite);
     };
 
+    let unsubMain: Unsubscribe | null = null;
+    let unsubResults: Unsubscribe | null = null;
+    let unsubGameLogs: Unsubscribe | null = null;
+    let unsubLoginLogs: Unsubscribe | null = null;
+
+    const cleanup = () => {
+      if (isCleanedUp) return;
+      isCleanedUp = true;
+      try { unsubMain && unsubMain(); } catch {}
+      try { unsubResults && unsubResults(); } catch {}
+      try { unsubGameLogs && unsubGameLogs(); } catch {}
+      try { unsubLoginLogs && unsubLoginLogs(); } catch {}
+    };
+
+    const handleSnapshotError = (err: any) => {
+      const isQuota = checkAndHandleFirestoreError(err);
+      if (onError) onError(err);
+      if (isQuota) {
+        cleanup();
+      }
+    };
+
     // 1. Listener for app_data/main (Master Data)
-    const unsubMain = onSnapshot(
+    unsubMain = onSnapshot(
       doc(db, MAIN_COLLECTION, MAIN_DOCUMENT),
       { includeMetadataChanges: true },
       (snap) => {
@@ -387,12 +455,12 @@ export function subscribeToAppData(
           emitConsolidated(snap.metadata.hasPendingWrites);
         }
       },
-      (err) => onError && onError(err)
+      handleSnapshotError
     );
 
-    // 2. Listener for exam_results collection (Real-time student exam submissions)
-    const unsubResults = onSnapshot(
-      collection(db, EXAM_RESULTS_COLLECTION),
+    // 2. Listener for exam_results collection (Real-time student exam submissions, limited to recent 100)
+    unsubResults = onSnapshot(
+      query(collection(db, EXAM_RESULTS_COLLECTION), limit(100)),
       { includeMetadataChanges: true },
       (snap) => {
         const list: ExamResult[] = [];
@@ -410,12 +478,12 @@ export function subscribeToAppData(
         });
         emitConsolidated(snap.metadata.hasPendingWrites);
       },
-      (err) => onError && onError(err)
+      handleSnapshotError
     );
 
-    // 3. Listener for game_logs collection
-    const unsubGameLogs = onSnapshot(
-      collection(db, GAME_LOGS_COLLECTION),
+    // 3. Listener for game_logs collection (limited to recent 50)
+    unsubGameLogs = onSnapshot(
+      query(collection(db, GAME_LOGS_COLLECTION), limit(50)),
       { includeMetadataChanges: true },
       (snap) => {
         const list: GameHistoryLog[] = [];
@@ -432,12 +500,12 @@ export function subscribeToAppData(
         });
         emitConsolidated(snap.metadata.hasPendingWrites);
       },
-      (err) => onError && onError(err)
+      handleSnapshotError
     );
 
-    // 4. Listener for login_logs collection
-    const unsubLoginLogs = onSnapshot(
-      collection(db, LOGIN_LOGS_COLLECTION),
+    // 4. Listener for login_logs collection (limited to recent 50)
+    unsubLoginLogs = onSnapshot(
+      query(collection(db, LOGIN_LOGS_COLLECTION), limit(50)),
       { includeMetadataChanges: true },
       (snap) => {
         const list: UserLoginLog[] = [];
@@ -456,16 +524,12 @@ export function subscribeToAppData(
         });
         emitConsolidated(snap.metadata.hasPendingWrites);
       },
-      (err) => onError && onError(err)
+      handleSnapshotError
     );
 
-    return () => {
-      unsubMain();
-      unsubResults();
-      unsubGameLogs();
-      unsubLoginLogs();
-    };
+    return cleanup;
   } catch (err) {
+    checkAndHandleFirestoreError(err);
     console.warn('[Firestore Realtime Subscription Warning]:', err);
     return null;
   }
@@ -476,6 +540,7 @@ export function subscribeToAppData(
  * 100% thread-safe: zero race conditions when 50+ students submit exams concurrently.
  */
 export async function syncExamResultToFirestore(result: ExamResult): Promise<void> {
+  if (isFirestoreQuotaExhausted()) return;
   const db = getFirestoreDb();
   if (!db || !result || !result.id) return;
 
@@ -483,8 +548,9 @@ export async function syncExamResultToFirestore(result: ExamResult): Promise<voi
     const resultRef = doc(db, EXAM_RESULTS_COLLECTION, result.id);
     await setDoc(resultRef, result, { merge: true });
     console.log('[Firestore] Hasil ujian siswa tersimpan mandiri di koleksi exam_results:', result.studentName);
-  } catch (err) {
-    console.warn('[Firestore] Gagal menyimpan hasil ujian mandiri:', err);
+  } catch (err: any) {
+    checkAndHandleFirestoreError(err);
+    console.warn('[Firestore] Gagal menyimpan hasil ujian mandiri:', err?.message || err);
   }
 }
 
@@ -616,14 +682,16 @@ export async function clearAllExamResultsInFirestore(): Promise<boolean> {
  * Safely writes an individual game log to dedicated 'game_logs' collection.
  */
 export async function syncGameLogToFirestore(log: GameHistoryLog): Promise<void> {
+  if (isFirestoreQuotaExhausted()) return;
   const db = getFirestoreDb();
   if (!db || !log || !log.id) return;
 
   try {
     const logRef = doc(db, GAME_LOGS_COLLECTION, log.id);
     await setDoc(logRef, log, { merge: true });
-  } catch (err) {
-    console.warn('[Firestore] Gagal menyimpan riwayat game mandiri:', err);
+  } catch (err: any) {
+    checkAndHandleFirestoreError(err);
+    console.warn('[Firestore] Gagal menyimpan riwayat game mandiri:', err?.message || err);
   }
 }
 
@@ -751,18 +819,31 @@ export async function clearAllGameLogsInFirestore(): Promise<boolean> {
   }
 }
 
+// In-memory tracker to throttle cloud presence writes to at most once per 3 minutes
+const lastTrackedCloudLogTimes = new Map<string, number>();
+
 /**
  * Track user login / heartbeat directly in 'login_logs' collection
+ * Includes smart throttling (max once every 3 minutes for periodic pings) unless force=true (e.g. login/logout event).
  */
-export async function trackUserLoginInFirestore(log: UserLoginLog): Promise<void> {
+export async function trackUserLoginInFirestore(log: UserLoginLog, force = false): Promise<void> {
+  if (isFirestoreQuotaExhausted()) return;
   const db = getFirestoreDb();
   if (!db || !log || !log.id) return;
+
+  const now = Date.now();
+  const lastTime = lastTrackedCloudLogTimes.get(log.id) || 0;
+  // If not forced (e.g. login/logout state change), limit writes to at most once per 3 minutes (180,000 ms)
+  if (!force && now - lastTime < 180000) {
+    return;
+  }
+  lastTrackedCloudLogTimes.set(log.id, now);
 
   try {
     const logRef = doc(db, LOGIN_LOGS_COLLECTION, log.id);
     await setDoc(logRef, log, { merge: true });
-  } catch (err) {
-    // Silent on network glitch
+  } catch (err: any) {
+    checkAndHandleFirestoreError(err);
   }
 }
 

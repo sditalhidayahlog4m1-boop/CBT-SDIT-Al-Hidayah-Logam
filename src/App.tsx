@@ -83,6 +83,7 @@ import {
   clearAllGameLogsInFirestore,
   purgeAdministratorLoginLog,
   isBankDeletedLocally,
+  isFirestoreQuotaExhausted,
   AppData,
 } from './utils/firebaseSync';
 import { subscribeToLocalSync, broadcastAppDataChange } from './utils/syncEngine';
@@ -361,16 +362,13 @@ export default function App() {
         const remoteData = await fetchAppDataFromFirestore(true);
         if (remoteData) {
           applyRemoteData(remoteData, false);
-        } else {
-          // If Firestore is empty, seed it with current local baseline
+        } else if (!isFirestoreQuotaExhausted()) {
+          // If Firestore is completely fresh/empty and quota is NOT exhausted, seed initial master data
           await saveAppDataToFirestore({
             teachers: teachersRef.current,
             students: studentsRef.current,
             subjects: subjectsRef.current,
             banks: banksRef.current,
-            results: resultsRef.current,
-            gameLogs: gameLogsRef.current,
-            loginLogs: loginLogsRef.current,
             dailyGrades: dailyGradesRef.current,
             schoolProfile: schoolProfileRef.current,
             rolePermissions: rolePermissionsRef.current,
@@ -391,8 +389,11 @@ export default function App() {
 
     performSync();
 
-    // Auto-refresh interval (polling fallback every 15s to keep monitoring perfectly updated)
+    // Background polling fallback (run every 3 minutes, only when tab is active/visible and quota is not exhausted)
     const pollInterval = setInterval(async () => {
+      if (typeof document !== 'undefined' && (document.visibilityState !== 'visible' || isFirestoreQuotaExhausted())) {
+        return;
+      }
       try {
         const freshData = await fetchAppDataFromFirestore(true);
         if (freshData) {
@@ -401,7 +402,7 @@ export default function App() {
       } catch (err) {
         // silent
       }
-    }, 15000);
+    }, 180000);
 
     return () => {
       clearInterval(pollInterval);
@@ -489,22 +490,23 @@ export default function App() {
     [currentUser]
   );
 
-  // Heartbeat Mechanism: Periodic active status ping every 15s to keep real-time monitoring perfectly live
-  useEffect(() => {
-    if (!currentUser) return;
+    // Heartbeat Mechanism: Periodic active status ping every 90s (when visible and active)
+    useEffect(() => {
+      if (!currentUser) return;
 
-    const pingHeartbeat = () => {
-      const activeState = currentUserActivityRef.current;
-      updateUserActivity(activeState.activity, activeState.details);
-    };
+      const pingHeartbeat = () => {
+        if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+        const activeState = currentUserActivityRef.current;
+        updateUserActivity(activeState.activity, activeState.details);
+      };
 
-    // Initial heartbeat on mount
-    pingHeartbeat();
+      // Initial heartbeat on mount
+      pingHeartbeat();
 
-    // Heartbeat every 15 seconds while session is active for real-time monitoring
-    const heartbeatTimer = setInterval(pingHeartbeat, 15000);
-    return () => clearInterval(heartbeatTimer);
-  }, [currentUser, updateUserActivity]);
+      // Heartbeat every 90 seconds while session is active for real-time monitoring without quota exhaustion
+      const heartbeatTimer = setInterval(pingHeartbeat, 90000);
+      return () => clearInterval(heartbeatTimer);
+    }, [currentUser, updateUserActivity]);
 
   // Synchronize Favicon, Web App Icons, Meta Tags, and Document Title with School Profile & Custom Logo
   useEffect(() => {
@@ -718,7 +720,7 @@ export default function App() {
         return updated;
       });
 
-      trackUserLoginInFirestore(newLog);
+      trackUserLoginInFirestore(newLog, true);
     }
 
     const targetTab = user.role === 'siswa' ? 'mulai-ujian' : user.role === 'guru' ? 'bank-soal' : 'dashboard';
@@ -755,7 +757,7 @@ export default function App() {
           status: 'offline',
           photoUrl: currentUser.photoUrl,
         };
-        trackUserLoginInFirestore(offlineLog);
+        trackUserLoginInFirestore(offlineLog, true);
       }
     }
 

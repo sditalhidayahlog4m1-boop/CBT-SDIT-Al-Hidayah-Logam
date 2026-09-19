@@ -28,7 +28,7 @@ try {
 export type SyncPayload = Partial<AppData>;
 
 // Emit changes to local tabs AND Firestore Cloud
-export function broadcastAppDataChange(data: Partial<AppData>) {
+export function broadcastAppDataChange(data: Partial<AppData>, options: { skipCloudSync?: boolean } = {}) {
   // 1. Instantly update localStorage
   if (data.teachers) saveStoredTeachers(data.teachers);
   if (data.students) saveStoredStudents(data.students);
@@ -52,7 +52,15 @@ export function broadcastAppDataChange(data: Partial<AppData>) {
     }
   }
 
-  // 3. Sync to Firebase Cloud Firestore for multi-device & multi-user sync
+  // 3. Skip cloud sync if explicitly requested or if data only contains streaming items (loginLogs, results, gameLogs)
+  if (options.skipCloudSync) return;
+  const keys = Object.keys(data).filter((k) => (data as any)[k] !== undefined);
+  const onlyHighVolume = keys.length > 0 && keys.every((k) => k === 'loginLogs' || k === 'results' || k === 'gameLogs');
+  if (onlyHighVolume) {
+    return;
+  }
+
+  // 4. Sync master data to Firebase Cloud Firestore for multi-device & multi-user sync
   saveAppDataToFirestore(data).catch((err) => {
     console.warn('[Firestore] Sync warning:', err);
   });
