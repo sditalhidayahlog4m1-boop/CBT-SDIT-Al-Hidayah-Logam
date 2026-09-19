@@ -23,11 +23,12 @@ import {
 interface BankSoalViewProps {
   banks: QuestionBank[];
   setBanks: React.Dispatch<React.SetStateAction<QuestionBank[]>>;
+  onSaveBank?: (bank: QuestionBank) => void;
   setActiveTab: (tab: ActiveTab) => void;
   subjects?: Subject[];
 }
 
-export const BankSoalView: React.FC<BankSoalViewProps> = ({ banks, setBanks, setActiveTab, subjects }) => {
+export const BankSoalView: React.FC<BankSoalViewProps> = ({ banks, setBanks, onSaveBank, setActiveTab, subjects }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedSubjectFilter, setSelectedSubjectFilter] = useState('ALL');
   const [previewBank, setPreviewBank] = useState<QuestionBank | null>(null);
@@ -176,16 +177,26 @@ export const BankSoalView: React.FC<BankSoalViewProps> = ({ banks, setBanks, set
       ...updatedBank,
       updatedAt: new Date().toISOString(),
     };
-    const updated = banks.map((b) => (b.id === bankWithTimestamp.id ? bankWithTimestamp : b));
+    const exists = banks.some((b) => String(b.id) === String(bankWithTimestamp.id));
+    const updated = exists
+      ? banks.map((b) => (String(b.id) === String(bankWithTimestamp.id) ? bankWithTimestamp : b))
+      : [bankWithTimestamp, ...banks];
+
     setBanks(updated);
     saveStoredBanks(updated);
+
+    if (onSaveBank) {
+      onSaveBank(bankWithTimestamp);
+    }
+
     broadcastAppDataChange({ banks: updated });
     saveAppDataToFirestore({ banks: updated });
 
-    if (previewBank?.id === bankWithTimestamp.id) {
+    if (previewBank && String(previewBank.id) === String(bankWithTimestamp.id)) {
       setPreviewBank(bankWithTimestamp);
     }
     setEditingBank(null);
+    setEditingQuestionIndex(0);
     addToast(
       'success',
       `Paket soal "${bankWithTimestamp.title}" berhasil diperbarui dan tersimpan permanen.`,
@@ -615,7 +626,7 @@ export const BankSoalView: React.FC<BankSoalViewProps> = ({ banks, setBanks, set
                       </button>
                     </div>
 
-                    <p className="font-semibold text-slate-100 leading-relaxed">{norm.questionText}</p>
+                    <p className="font-semibold text-slate-100 leading-relaxed whitespace-pre-line" dir="auto">{norm.questionText}</p>
 
                     {/* Gambar Soal jika ada */}
                     {norm.gambarUrl && (
@@ -628,27 +639,35 @@ export const BankSoalView: React.FC<BankSoalViewProps> = ({ banks, setBanks, set
                       </div>
                     )}
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
-                      {norm.optionsList.map((opt, i) => (
-                        <div
-                          key={i}
-                          className={`p-2 rounded-lg border flex items-center gap-2 ${
-                            opt.isCorrect
-                              ? 'bg-emerald-500/10 border-emerald-500/30 font-bold text-emerald-300'
-                              : 'bg-slate-800 border-slate-700 text-slate-300'
-                          }`}
-                        >
-                          <span
-                            className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
-                              opt.isCorrect ? 'bg-emerald-600 text-white' : 'bg-slate-700 text-slate-300'
+                    {norm.type === 'esai' ? (
+                      <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg text-amber-200 space-y-1">
+                        <span className="font-bold block text-amber-400 text-[11px]">Kunci Jawaban Esai / Pedoman Penskoran:</span>
+                        <p className="text-slate-200 whitespace-pre-line text-xs">{norm.essayAnswerKey || 'Kunci jawaban belum ditentukan.'}</p>
+                        <span className="text-[10px] text-amber-300 font-bold block pt-0.5">Bobot Nilai: {norm.scoreWeight || 10} Poin</span>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                        {norm.optionsList.map((opt, i) => (
+                          <div
+                            key={i}
+                            className={`p-2 rounded-lg border flex items-center gap-2 ${
+                              opt.isCorrect
+                                ? 'bg-emerald-500/10 border-emerald-500/30 font-bold text-emerald-300'
+                                : 'bg-slate-800 border-slate-700 text-slate-300'
                             }`}
                           >
-                            {opt.letter}
-                          </span>
-                          <span>{opt.text}</span>
-                        </div>
-                      ))}
-                    </div>
+                            <span
+                              className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                                opt.isCorrect ? 'bg-emerald-600 text-white' : 'bg-slate-700 text-slate-300'
+                              }`}
+                            >
+                              {opt.letter}
+                            </span>
+                            <span dir="auto">{opt.text}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                     {norm.explanationText && (
                       <div className="mt-2 p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-lg text-amber-200">
                         <span className="font-bold block text-amber-400">Pembahasan:</span>

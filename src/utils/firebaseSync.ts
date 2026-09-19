@@ -28,6 +28,7 @@ import {
   DailyGradeRecord,
 } from '../types';
 import { SchoolProfile, AdminAccount } from './storage';
+import { normalizeExamResults, getExamResultTimestamp } from './dateUtils';
 import firebaseConfigRaw from '../../firebase-applet-config.json';
 
 // Local sets of IDs permanently deleted by user to prevent stale read race conditions
@@ -401,9 +402,10 @@ export function subscribeToAppData(
             list.push(item);
           }
         });
-        currentResults = list.sort((a, b) => {
-          const timeA = new Date(a.date || (a as any).completedAt || 0).getTime();
-          const timeB = new Date(b.date || (b as any).completedAt || 0).getTime();
+        const normalizedList = normalizeExamResults(list);
+        currentResults = normalizedList.sort((a, b) => {
+          const timeA = getExamResultTimestamp(a);
+          const timeB = getExamResultTimestamp(b);
           return timeB - timeA;
         });
         emitConsolidated(snap.metadata.hasPendingWrites);

@@ -104,7 +104,7 @@ export const Header: React.FC<HeaderProps> = ({
   );
 
   // Realtime clock and date state
-  const [currentTime, setCurrentTime] = useState<Date>(new Date());
+  const [currentTime, setCurrentTime] = useState<Date>(() => new Date());
 
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
@@ -112,6 +112,9 @@ export const Header: React.FC<HeaderProps> = ({
 
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
+
+    // Immediate sync
+    setCurrentTime(new Date());
 
     const timer = setInterval(() => {
       setCurrentTime(new Date());
@@ -131,12 +134,8 @@ export const Header: React.FC<HeaderProps> = ({
     year: 'numeric',
   });
 
-  const formattedTime = currentTime.toLocaleTimeString('id-ID', {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  });
+  const padZero = (n: number) => n.toString().padStart(2, '0');
+  const formattedTime = `${padZero(currentTime.getHours())}:${padZero(currentTime.getMinutes())}:${padZero(currentTime.getSeconds())}`;
 
   const currentInfo =
     activeTab === 'ai-pembuat-game' && currentUser?.role === 'siswa'

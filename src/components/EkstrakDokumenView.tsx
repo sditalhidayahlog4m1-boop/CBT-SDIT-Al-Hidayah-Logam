@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { QuestionBank, Question, QuestionOption, ActiveTab, Subject, Teacher } from '../types';
 import { getStoredSubjects } from '../utils/storage';
+import { parseDocumentQuestions, convertParsedToQuestions } from '../utils/documentQuestionParser';
 
 export interface FontOption {
   id: string;
@@ -156,174 +157,11 @@ export const EkstrakDokumenView: React.FC<EkstrakDokumenViewProps> = ({
   const [successMessage, setSuccessMessage] = useState('');
 
   // Parser logic that handles BOTH Multiple Choice (PG) AND Essay (Esai) questions
+  // Supports "soal berundak" (stepped questions with Quranic verses / stimuli), preserving line breaks
+  // Strictly defaults to Pilihan Ganda (PG) unless an explicit essay tag / section is present!
   const parseDocumentText = (rawText: string): Question[] => {
-    if (!rawText.trim()) return [];
-
-    const lines = rawText.split('\n').map((l) => l.trim()).filter(Boolean);
-    const questions: Question[] = [];
-
-    let currentQuestionText = '';
-    let currentOptions: { letter: string; text: string }[] = [];
-    let currentKey = '';
-    let currentEssayKey = '';
-    let currentExplanation = '';
-    let currentScoreWeight = 10;
-    let isExplicitEssay = false;
-    let isSectionEssay = false;
-    let qNumber = 1;
-
-    const commitQuestion = () => {
-      if (currentQuestionText.trim()) {
-        const hasOptions = currentOptions.length > 0;
-        const isEssay = isExplicitEssay || isSectionEssay || !hasOptions;
-
-        if (isEssay) {
-          // SOAL ESAI / URAIAN
-          const finalEssayKey =
-            currentEssayKey ||
-            currentKey ||
-            (currentExplanation ? currentExplanation : 'Kunci jawaban dan pedoman penskoran esai guru.');
-
-          questions.push({
-            id: `q-ext-${Date.now()}-${qNumber}`,
-            question_number: qNumber,
-            question_text: currentQuestionText.trim(),
-            type: 'esai',
-            options: [],
-            essayAnswerKey: finalEssayKey,
-            scoreWeight: currentScoreWeight || 10,
-            explanation: currentExplanation || 'Pedoman penskoran soal esai/uraian.',
-          });
-          qNumber++;
-        } else {
-          // SOAL PILIHAN GANDA (PG)
-          const parsedOptions: QuestionOption[] = currentOptions.map((opt) => ({
-            option_letter: opt.letter.toUpperCase(),
-            option_text: opt.text.trim(),
-            is_correct: opt.letter.toUpperCase() === currentKey.toUpperCase(),
-          }));
-
-          const hasCorrect = parsedOptions.some((o) => o.is_correct);
-          if (!hasCorrect && parsedOptions.length > 0) {
-            parsedOptions[0].is_correct = true;
-          }
-
-          questions.push({
-            id: `q-ext-${Date.now()}-${qNumber}`,
-            question_number: qNumber,
-            question_text: currentQuestionText.trim(),
-            type: 'pilihan_ganda',
-            options: parsedOptions,
-            explanation: currentExplanation || 'Pembahasan soal otomatis dari dokumen.',
-            scoreWeight: currentScoreWeight || 10,
-          });
-          qNumber++;
-        }
-      }
-
-      currentQuestionText = '';
-      currentOptions = [];
-      currentKey = '';
-      currentEssayKey = '';
-      currentExplanation = '';
-      currentScoreWeight = 10;
-      isExplicitEssay = false;
-    };
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-
-      // Check section header for Essay e.g. "B. SOAL ESAI", "II. URAIAN", "BAGIAN B: SOAL ESAI"
-      const sectionMatch = line.match(
-        /^(?:(?:BAGIAN|ROMBEL|PART)\s+[A-Z0-9]+[:\s]*)?(?:[A-Z0-9][\.\)]\s*)?(?:SOAL\s+)?(?:ESAI|URAIAN)\b/i
-      );
-      if (sectionMatch && !line.match(/^[A-E][\.\)]/)) {
-        if (currentQuestionText) {
-          commitQuestion();
-        }
-        isSectionEssay = true;
-        continue;
-      }
-
-      // Check if section reverts back to PG e.g. "A. PILIHAN GANDA"
-      const pgSectionMatch = line.match(
-        /^(?:(?:BAGIAN|ROMBEL|PART)\s+[A-Z0-9]+[:\s]*)?(?:[A-Z0-9][\.\)]\s*)?(?:SOAL\s+)?PILIHAN\s+GANDA\b/i
-      );
-      if (pgSectionMatch) {
-        if (currentQuestionText) {
-          commitQuestion();
-        }
-        isSectionEssay = false;
-        continue;
-      }
-
-      // Check if line matches Question start e.g. "1. Pertanyaan...", "Soal 1:", "1) ..."
-      const qMatch = line.match(/^(?:Soal\s*)?(\d+)[\.\)]\s*(.+)/i);
-
-      // Check if line matches Option e.g. "A. pilihan...", "A) pilihan...", "a. pilihan..."
-      const optMatch = line.match(/^([A-Ea-e])[\.\)]\s*(.+)/);
-
-      // Check if line matches Key e.g. "Kunci: C", "Jawaban: C", "Kunci Jawaban: C" or "Kunci: Teks jawaban esai..."
-      const keyMatch = line.match(/^(?:Kunci|Jawaban|Kunci\s*Jawaban|Answer)\s*[:=]\s*(.+)/i);
-
-      // Check if line matches Bobot/Score e.g. "Bobot: 10", "Skor: 15", "Poin: 20"
-      const scoreMatch = line.match(/^(?:Bobot|Skor|Poin|Nilai)\s*[:=]\s*(\d+)/i);
-
-      // Check if line matches Explanation e.g. "Pembahasan: ..."
-      const expMatch = line.match(/^(?:Pembahasan|Penjelasan|Bahasan|Rubrik)\s*[:=]\s*(.+)/i);
-
-      if (scoreMatch) {
-        currentScoreWeight = parseInt(scoreMatch[1], 10) || 10;
-      } else if (keyMatch) {
-        const val = keyMatch[1].trim();
-        // If single letter A-E and we have options, it's PG key
-        if (/^[A-E]$/i.test(val) && currentOptions.length > 0) {
-          currentKey = val.toUpperCase();
-        } else {
-          // Essay answer key or multi-sentence key
-          currentEssayKey = val;
-          if (currentOptions.length === 0) {
-            isExplicitEssay = true;
-          }
-        }
-      } else if (expMatch) {
-        currentExplanation = expMatch[1].trim();
-      } else if (optMatch && !isExplicitEssay && !isSectionEssay) {
-        currentOptions.push({
-          letter: optMatch[1].toUpperCase(),
-          text: optMatch[2].trim(),
-        });
-      } else if (qMatch) {
-        // If we already had a question pending, commit it
-        if (currentQuestionText) {
-          commitQuestion();
-        }
-
-        let qText = qMatch[2].trim();
-        // Check if question explicitly tagged as [Esai] or (Uraian)
-        if (/^\[(?:esai|uraian)\]/i.test(qText) || /^\((?:esai|uraian)\)/i.test(qText)) {
-          isExplicitEssay = true;
-          qText = qText.replace(/^\[(?:esai|uraian)\]\s*/i, '').replace(/^\((?:esai|uraian)\)\s*/i, '');
-        }
-        currentQuestionText = qText;
-      } else {
-        // If line is continuation text
-        if (currentOptions.length > 0) {
-          currentOptions[currentOptions.length - 1].text += ' ' + line;
-        } else if (currentQuestionText) {
-          currentQuestionText += ' ' + line;
-        } else {
-          currentQuestionText = line;
-        }
-      }
-    }
-
-    // Commit final question
-    if (currentQuestionText) {
-      commitQuestion();
-    }
-
-    return questions;
+    const parsed = parseDocumentQuestions(rawText);
+    return convertParsedToQuestions(parsed);
   };
 
   // Quick Template Helpers
@@ -1069,7 +907,7 @@ Pembahasan: Kisah kehancuran tentara gajah dalam Surah Al-Fiil.`;
                           ? 'right'
                           : 'left',
                     }}
-                    className="font-bold text-slate-100"
+                    className="font-bold text-slate-100 whitespace-pre-line"
                   >
                     {q.question_text}
                   </p>

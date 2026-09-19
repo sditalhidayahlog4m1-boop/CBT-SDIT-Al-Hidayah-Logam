@@ -2,6 +2,7 @@ import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import { QuestionBank, QuestionOption, Teacher, Student, Subject, ExamResult, DailyGradeRecord, FullBackupData } from '../types';
 import { getGradePredicate, GRADE_SCALE_TABLE } from './gradeHelper';
+import { formatExamDisplayDate } from './dateUtils';
 
 // Download Excel Template for Upload Soal
 export function downloadSoalTemplate() {
@@ -281,7 +282,7 @@ export function exportExamResultsExcel(results: ExamResult[], targetSubject?: st
   const formatRows = (list: ExamResult[]) =>
     list.map((r, i) => ({
       'NO': i + 1,
-      'TANGGAL': r.date,
+      'TANGGAL': formatExamDisplayDate(r),
       'NAMA SISWA': r.studentName,
       'KELAS': r.classRoom,
       'MATA PELAJARAN': r.subject,

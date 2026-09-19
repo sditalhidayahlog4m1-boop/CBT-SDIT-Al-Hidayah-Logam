@@ -1,4 +1,5 @@
 import { Teacher, Student, Subject, QuestionBank, ExamResult, AuthUser, RolePermissions, GameHistoryLog, UserLoginLog, DailyGradeRecord, BackupArchiveItem } from '../types';
+import { normalizeExamResults } from './dateUtils';
 
 export function getStoredCurrentUser(): AuthUser | null {
   try {
@@ -176,7 +177,9 @@ export function getStoredResults(): ExamResult[] {
   try {
     const data = localStorage.getItem('cbt_results');
     if (!data) return [];
-    return JSON.parse(data) || [];
+    const parsed = JSON.parse(data);
+    if (!Array.isArray(parsed)) return [];
+    return normalizeExamResults(parsed);
   } catch {
     return [];
   }

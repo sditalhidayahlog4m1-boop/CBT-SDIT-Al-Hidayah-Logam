@@ -117,6 +117,8 @@ export interface ExamResult {
   bankId: string;
   studentId?: string;
   userId?: string;
+  timestamp?: number;
+  completedAt?: string;
 }
 
 export interface GameHistoryLog {

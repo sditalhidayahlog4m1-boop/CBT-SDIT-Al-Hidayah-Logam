@@ -23,6 +23,7 @@ import { QuestionBank, ExamResult } from '../types';
 import { normalizeQuestion } from '../utils/normalizeQuestion';
 import { useHistoryModal } from '../utils/navigationHistory';
 import { AVAILABLE_FONTS, FontOption } from './EkstrakDokumenView';
+import { formatToLocalDateTime } from '../utils/dateUtils';
 
 interface ExamScreenProps {
   studentName: string;
@@ -282,26 +283,23 @@ export const ExamScreen: React.FC<ExamScreenProps> = ({
     }
   }, [userAnswers, flaggedQuestions, secondsRemaining, currentIndex, bank.id, studentName, isExamCompleted]);
 
-  // Live timer interval (both elapsed and remaining)
+  // Live timer interval (both elapsed and remaining) synchronized with real wall clock
   useEffect(() => {
     if (isExamCompleted) return;
 
-    const timer = setInterval(() => {
+    const tick = () => {
       const now = Date.now();
       const currentElapsed = Math.max(0, Math.floor((now - startTime) / 1000));
       setElapsedSeconds(currentElapsed);
+      const remaining = Math.max(0, totalSecondsAllocated - currentElapsed);
+      setSecondsRemaining(remaining);
+    };
 
-      setSecondsRemaining((prev) => {
-        if (prev <= 1) {
-          clearInterval(timer);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
+    tick();
+    const timer = setInterval(tick, 1000);
 
     return () => clearInterval(timer);
-  }, [isExamCompleted, startTime]);
+  }, [isExamCompleted, startTime, totalSecondsAllocated]);
 
   const formatTimer = (totalSecs: number) => {
     const mins = Math.floor(totalSecs / 60);
@@ -417,9 +415,12 @@ export const ExamScreen: React.FC<ExamScreenProps> = ({
     const secsSpent = secondsSpent % 60;
     const durationSpentStr = `${minsSpent} menit ${secsSpent} detik`;
 
+    const nowEpoch = Date.now();
     const result: ExamResult = {
-      id: 'res-' + Date.now(),
-      date: new Date().toISOString().replace('T', ' ').slice(0, 16),
+      id: 'res-' + nowEpoch,
+      date: formatToLocalDateTime(nowEpoch),
+      timestamp: nowEpoch,
+      completedAt: new Date(nowEpoch).toISOString(),
       studentName,
       classRoom,
       subject: bank.subject,
@@ -640,11 +641,13 @@ export const ExamScreen: React.FC<ExamScreenProps> = ({
               <>
                 <div className="p-6 bg-[#0f172a] rounded-2xl border border-slate-800 shadow-sm space-y-4">
                   <p
-                    className="font-bold text-slate-100 leading-relaxed"
+                    className="font-bold text-slate-100 leading-relaxed whitespace-pre-line"
+                    dir="auto"
                     style={{
                       fontFamily: activeFont.family,
                       fontSize: appliedFontSize,
-                      direction: isArabicQuestion ? 'rtl' : 'ltr',
+                      unicodeBidi: 'plaintext',
+                      direction: isArabicQuestion && !normQ.questionText.trim().match(/^[0-9A-Za-z]/) ? 'rtl' : 'ltr',
                       lineHeight: lineSpacing,
                     }}
                   >

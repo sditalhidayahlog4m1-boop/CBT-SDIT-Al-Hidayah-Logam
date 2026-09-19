@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Save,
   X,
@@ -82,9 +82,25 @@ export const EditBankSoalModal: React.FC<EditBankSoalModalProps> = ({
     return findMatchingSubject(bank ? { ...bank, subject } : subject, subjectList);
   }, [subject, subjectList, bank]);
 
-  // Initialize questions on bank change
+  // Track currently loaded bank ID so re-renders or background sync do not wipe ongoing edits
+  const loadedBankIdRef = useRef<string | null>(null);
+
+  // When modal closes, reset loaded bank tracker
+  useEffect(() => {
+    if (!isOpen) {
+      loadedBankIdRef.current = null;
+    }
+  }, [isOpen]);
+
+  // Initialize questions on bank change or modal open
   useEffect(() => {
     if (isOpen && bank) {
+      // Prevent resetting if the same bank is already being edited in this open session
+      if (loadedBankIdRef.current === String(bank.id)) {
+        return;
+      }
+      loadedBankIdRef.current = String(bank.id);
+
       setActiveTab(initialTab);
       setTitle(bank.title || '');
       const bankSubj = bank.subject || '';
@@ -109,6 +125,22 @@ export const EditBankSoalModal: React.FC<EditBankSoalModalProps> = ({
       // Normalize all existing questions to standard Question format
       const standardQuestions: Question[] = (bank.questions || []).map((q, idx) => {
         const norm = normalizeQuestion(q, idx, bank.title || bank.subject);
+        const isEssay = norm.type === 'esai';
+
+        if (isEssay) {
+          return {
+            id: norm.id || `q-${Date.now()}-${idx}`,
+            question_number: idx + 1,
+            question_text: norm.questionText,
+            type: 'esai',
+            options: [],
+            essayAnswerKey: norm.essayAnswerKey || '',
+            scoreWeight: norm.scoreWeight || 10,
+            explanation: norm.explanationText || '',
+            gambarUrl: norm.gambarUrl || undefined,
+          };
+        }
+
         const options: QuestionOption[] = norm.optionsList.map((opt) => ({
           option_letter: opt.letter,
           option_text: opt.text,
@@ -135,9 +167,11 @@ export const EditBankSoalModal: React.FC<EditBankSoalModalProps> = ({
           id: norm.id || `q-${Date.now()}-${idx}`,
           question_number: idx + 1,
           question_text: norm.questionText,
+          type: 'pilihan_ganda',
           options: options,
           explanation: norm.explanationText || '',
           gambarUrl: norm.gambarUrl || undefined,
+          scoreWeight: norm.scoreWeight || 10,
         };
       });
 
@@ -325,7 +359,7 @@ export const EditBankSoalModal: React.FC<EditBankSoalModalProps> = ({
       return;
     }
 
-    // Validate that each question has valid question_text and at least one correct option
+    // Validate that each question has valid question_text and at least one correct option for PG
     for (let i = 0; i < questions.length; i++) {
       const q = questions[i];
       if (!q.question_text.trim()) {
@@ -334,17 +368,19 @@ export const EditBankSoalModal: React.FC<EditBankSoalModalProps> = ({
         setActiveTab('soal');
         return;
       }
-      if (!q.options || q.options.length < 2) {
-        setErrorMessage(`Soal nomor ${i + 1} minimal harus memiliki 2 pilihan ganda.`);
-        setActiveQIndex(i);
-        setActiveTab('soal');
-        return;
-      }
-      if (!q.options.some((o) => o.is_correct)) {
-        setErrorMessage(`Soal nomor ${i + 1} belum ditentukan kunci jawaban yang benar.`);
-        setActiveQIndex(i);
-        setActiveTab('soal');
-        return;
+      if (q.type !== 'esai') {
+        if (!q.options || q.options.length < 2) {
+          setErrorMessage(`Soal nomor ${i + 1} minimal harus memiliki 2 pilihan ganda.`);
+          setActiveQIndex(i);
+          setActiveTab('soal');
+          return;
+        }
+        if (!q.options.some((o) => o.is_correct)) {
+          setErrorMessage(`Soal nomor ${i + 1} belum ditentukan kunci jawaban yang benar.`);
+          setActiveQIndex(i);
+          setActiveTab('soal');
+          return;
+        }
       }
     }
 
@@ -358,11 +394,12 @@ export const EditBankSoalModal: React.FC<EditBankSoalModalProps> = ({
       token: token.trim().toUpperCase(),
       total_questions: questions.length,
       durationMinutes: Number(durationMinutes) || 45,
-      minWorkingMinutes: Number(minWorkingMinutes) || 30,
+      minWorkingMinutes: Number(minWorkingMinutes) !== undefined ? Number(minWorkingMinutes) : 30,
       updatedAt: new Date().toISOString(),
       questions: questions.map((q, idx) => ({ ...q, question_number: idx + 1 })),
     };
 
+    loadedBankIdRef.current = String(updatedBank.id);
     onSave(updatedBank);
     onClose();
   };

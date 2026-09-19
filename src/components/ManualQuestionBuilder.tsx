@@ -28,6 +28,7 @@ import {
   AlignRight,
 } from 'lucide-react';
 import { QuestionBank, AuthUser, Teacher, Subject, Student, Question, QuestionOption } from '../types';
+import { parseDocumentQuestions } from '../utils/documentQuestionParser';
 import {
   getStoredTeachers,
   getStoredSubjects,
@@ -49,156 +50,38 @@ export interface QuestionManualItem {
 }
 
 // Utility function to parse raw pasted text (Word/Text document) for both PG and Essay
+// Supports "soal berundak" (stepped questions with Quranic verses / stimuli), preserving line breaks
+// Strictly defaults to Pilihan Ganda (PG) unless an explicit essay tag / section is present!
 export function parseRawDocumentText(rawText: string): QuestionManualItem[] {
-  if (!rawText.trim()) return [];
-
-  const lines = rawText.split('\n').map((l) => l.trim()).filter(Boolean);
-  const questions: QuestionManualItem[] = [];
-
-  let currentQuestionText = '';
-  let currentOptions: string[] = [];
-  let currentKey = '';
-  let currentEssayKey = '';
-  let currentExplanation = '';
-  let currentScoreWeight = 10;
-  let isExplicitEssay = false;
-  let isSectionEssay = false;
-  let qNumber = 1;
-
-  const commitQuestion = () => {
-    if (currentQuestionText.trim()) {
-      const hasOptions = currentOptions.length > 0;
-      const isEssay = isExplicitEssay || isSectionEssay || !hasOptions;
-
-      if (isEssay) {
-        const finalKey =
-          currentEssayKey || currentKey || currentExplanation || 'Kunci jawaban esai guru.';
-
-        questions.push({
-          id: `qm-${Date.now()}-${qNumber}`,
-          question: currentQuestionText.trim(),
-          type: 'esai',
-          options: [],
-          answer: finalKey,
-          essayAnswerKey: finalKey,
-          scoreWeight: currentScoreWeight || 10,
-          explanation: currentExplanation.trim(),
-        });
-        qNumber++;
-      } else {
-        const cleanOpts = currentOptions.map((o) => o.trim()).filter(Boolean);
-        while (cleanOpts.length < 4) {
-          cleanOpts.push('');
-        }
-
-        let matchedAnswer = '';
-        if (/^[A-E]$/i.test(currentKey)) {
-          const letterIdx = currentKey.toUpperCase().charCodeAt(0) - 65;
-          if (letterIdx >= 0 && letterIdx < cleanOpts.length && cleanOpts[letterIdx]) {
-            matchedAnswer = cleanOpts[letterIdx];
-          }
-        }
-        if (!matchedAnswer && cleanOpts.length > 0) {
-          matchedAnswer = cleanOpts[0];
-        }
-
-        questions.push({
-          id: `qm-${Date.now()}-${qNumber}`,
-          question: currentQuestionText.trim(),
-          type: 'pilihan_ganda',
-          options: cleanOpts.slice(0, 4),
-          answer: matchedAnswer,
-          scoreWeight: currentScoreWeight || 10,
-          explanation: currentExplanation.trim(),
-        });
-        qNumber++;
-      }
+  const parsed = parseDocumentQuestions(rawText);
+  return parsed.map((p, idx) => {
+    if (p.type === 'esai') {
+      const finalKey = p.essayAnswerKey || p.key || 'Kunci jawaban esai guru.';
+      return {
+        id: `qm-${Date.now()}-${idx + 1}`,
+        question: p.questionText,
+        type: 'esai',
+        options: [],
+        answer: finalKey,
+        essayAnswerKey: finalKey,
+        scoreWeight: p.scoreWeight || 10,
+        explanation: p.explanation || '',
+      };
     }
 
-    currentQuestionText = '';
-    currentOptions = [];
-    currentKey = '';
-    currentEssayKey = '';
-    currentExplanation = '';
-    currentScoreWeight = 10;
-    isExplicitEssay = false;
-  };
+    const opts = p.options.map((o) => o.text);
+    const correctOpt = p.options.find((o) => o.isCorrect) || p.options[0];
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-
-    // Check section header for Essay e.g. "B. SOAL ESAI", "II. URAIAN"
-    const sectionMatch = line.match(
-      /^(?:(?:BAGIAN|ROMBEL|PART)\s+[A-Z0-9]+[:\s]*)?(?:[A-Z0-9][\.\)]\s*)?(?:SOAL\s+)?(?:ESAI|URAIAN)\b/i
-    );
-    if (sectionMatch && !line.match(/^[A-E][\.\)]/)) {
-      if (currentQuestionText) {
-        commitQuestion();
-      }
-      isSectionEssay = true;
-      continue;
-    }
-
-    // Check if section reverts back to PG
-    const pgSectionMatch = line.match(
-      /^(?:(?:BAGIAN|ROMBEL|PART)\s+[A-Z0-9]+[:\s]*)?(?:[A-Z0-9][\.\)]\s*)?(?:SOAL\s+)?PILIHAN\s+GANDA\b/i
-    );
-    if (pgSectionMatch) {
-      if (currentQuestionText) {
-        commitQuestion();
-      }
-      isSectionEssay = false;
-      continue;
-    }
-
-    const qMatch = line.match(/^(?:Soal\s*)?(\d+)[\.\)]\s*(.+)/i);
-    const optMatch = line.match(/^([A-Ea-e])[\.\)]\s*(.+)/);
-    const keyMatch = line.match(/^(?:Kunci|Jawaban|Kunci\s*Jawaban|Answer)\s*[:=]\s*(.+)/i);
-    const scoreMatch = line.match(/^(?:Bobot|Skor|Poin|Nilai)\s*[:=]\s*(\d+)/i);
-    const expMatch = line.match(/^(?:Pembahasan|Penjelasan|Bahasan|Rubrik)\s*[:=]\s*(.+)/i);
-
-    if (scoreMatch) {
-      currentScoreWeight = parseInt(scoreMatch[1], 10) || 10;
-    } else if (keyMatch) {
-      const val = keyMatch[1].trim();
-      if (/^[A-E]$/i.test(val) && currentOptions.length > 0) {
-        currentKey = val.toUpperCase();
-      } else {
-        currentEssayKey = val;
-        if (currentOptions.length === 0) {
-          isExplicitEssay = true;
-        }
-      }
-    } else if (expMatch) {
-      currentExplanation = expMatch[1].trim();
-    } else if (optMatch && !isExplicitEssay && !isSectionEssay) {
-      currentOptions.push(optMatch[2]);
-    } else if (qMatch) {
-      if (currentQuestionText) {
-        commitQuestion();
-      }
-      let qText = qMatch[2].trim();
-      if (/^\[(?:esai|uraian)\]/i.test(qText) || /^\((?:esai|uraian)\)/i.test(qText)) {
-        isExplicitEssay = true;
-        qText = qText.replace(/^\[(?:esai|uraian)\]\s*/i, '').replace(/^\((?:esai|uraian)\)\s*/i, '');
-      }
-      currentQuestionText = qText;
-    } else {
-      if (currentOptions.length > 0) {
-        currentOptions[currentOptions.length - 1] += ' ' + line;
-      } else if (currentQuestionText) {
-        currentQuestionText += ' ' + line;
-      } else {
-        currentQuestionText = line;
-      }
-    }
-  }
-
-  if (currentQuestionText) {
-    commitQuestion();
-  }
-
-  return questions;
+    return {
+      id: `qm-${Date.now()}-${idx + 1}`,
+      question: p.questionText,
+      type: 'pilihan_ganda',
+      options: opts.slice(0, 4),
+      answer: correctOpt ? correctOpt.text : (opts[0] || ''),
+      scoreWeight: p.scoreWeight || 10,
+      explanation: p.explanation || '',
+    };
+  });
 }
 
 interface ManualQuestionBuilderProps {

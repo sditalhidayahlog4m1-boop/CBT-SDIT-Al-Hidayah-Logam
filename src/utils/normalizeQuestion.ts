@@ -136,10 +136,11 @@ export function normalizeQuestion(
     if (typeof rawCorrectAns === 'string' && rawCorrectAns.trim()) {
       const trimmedAns = rawCorrectAns.trim();
 
-      // Is single letter A-E
-      if (/^[A-E]$/i.test(trimmedAns)) {
-        const targetLetter = trimmedAns.toUpperCase();
-        const found = optionsList.find((o) => o.letter === targetLetter);
+      // Check single letter A-E, with optional period, bracket, parentheses, or trailing text e.g. "D.", "(D)", "[D]", "D. ثُمَّ أَدْبَرَ يَسْعَىٰ"
+      const letterM = trimmedAns.match(/^(?:\[|\()?([A-Ea-e])(?:\.|\)|\:|\s|$)/);
+      if (letterM || /^[A-E]$/i.test(trimmedAns)) {
+        const targetLetter = (letterM ? letterM[1] : trimmedAns).toUpperCase();
+        const found = optionsList.find((o) => o.letter.toUpperCase() === targetLetter);
         if (found) {
           found.isCorrect = true;
           correctAnswerText = found.text;
@@ -176,7 +177,37 @@ export function normalizeQuestion(
   const gambarUrl = typeof rawGambar === 'string' && rawGambar.trim() ? rawGambar.trim() : undefined;
 
   // 7. Resolve Question Type & Essay Key
-  const resolvedType = q.type || (optionsList.length === 0 ? 'esai' : 'pilihan_ganda');
+  // Per user requirement: Never classify as esai unless explicitly specified as such!
+  const hasExplicitEssay =
+    q.type === 'esai' ||
+    Boolean(q.isExplicitEssay) ||
+    /\[(?:esai|uraian)\]/i.test(questionText) ||
+    /\((?:esai|uraian)\)/i.test(questionText) ||
+    /\b(?:bentuk|tipe|jenis)(?:\s+soal)?\s*:\s*(?:esai|uraian)\b/i.test(questionText);
+
+  const resolvedType = hasExplicitEssay
+    ? 'esai'
+    : q.type === 'pilihan_ganda'
+    ? 'pilihan_ganda'
+    : optionsList.length > 0
+    ? 'pilihan_ganda'
+    : 'pilihan_ganda';
+
+  // If question is pilihan_ganda but optionsList is empty, generate standard options
+  if (resolvedType === 'pilihan_ganda' && optionsList.length === 0) {
+    const defaultLetters = ['A', 'B', 'C', 'D'];
+    defaultLetters.forEach((l, idx) => {
+      optionsList.push({
+        letter: l,
+        text: `Pilihan ${l}`,
+        isCorrect: idx === 0,
+      });
+      rawOptions.push(`Pilihan ${l}`);
+    });
+    correctAnswerText = optionsList[0].text;
+    correctAnswerLetter = optionsList[0].letter;
+  }
+
   const essayAnswerKey = q.essayAnswerKey || q.kunciEsai || q.kunci_jawaban || q.kunci || '';
   const scoreWeight = Number(q.scoreWeight) || 10;
 

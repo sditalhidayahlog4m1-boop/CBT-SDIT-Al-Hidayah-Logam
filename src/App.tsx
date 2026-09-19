@@ -43,6 +43,7 @@ import {
   getStoredAdminAccount,
   saveStoredAdminAccount,
 } from './utils/storage';
+import { normalizeExamResults } from './utils/dateUtils';
 
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
@@ -280,10 +281,13 @@ export default function App() {
         }
       }
     }
-    if (Array.isArray(data.results) && !isDeepEqual(resultsRef.current, data.results)) {
-      setResults(data.results);
-      saveStoredResults(data.results);
-      lastSyncedDataRef.current.results = data.results;
+    if (Array.isArray(data.results)) {
+      const normalized = normalizeExamResults(data.results);
+      if (!isDeepEqual(resultsRef.current, normalized)) {
+        setResults(normalized);
+        saveStoredResults(normalized);
+        lastSyncedDataRef.current.results = normalized;
+      }
     }
     if (Array.isArray(data.gameLogs) && !isDeepEqual(gameLogsRef.current, data.gameLogs)) {
       setGameLogs(data.gameLogs);
@@ -976,14 +980,14 @@ export default function App() {
     }
   }, [currentUser, activeTab, rolePermissions]);
 
-  // Handler when AI Generator or Upload saves new Question Bank
+  // Handler when AI Generator, Manual Builder or Bank Editor saves Question Bank
   const handleSaveBank = (newBank: QuestionBank) => {
     const bankWithTime: QuestionBank = {
       ...newBank,
       updatedAt: new Date().toISOString(),
     };
     setBanks((prev) => {
-      const filtered = prev.filter((b) => b.id !== bankWithTime.id);
+      const filtered = prev.filter((b) => String(b.id) !== String(bankWithTime.id));
       const updated = [bankWithTime, ...filtered];
       saveStoredBanks(updated);
       lastLocalBankEditTimeRef.current = Date.now();
@@ -1522,6 +1526,7 @@ export default function App() {
             <BankSoalView
               banks={banks}
               setBanks={setBanks}
+              onSaveBank={handleSaveBank}
               setActiveTab={handleNavigateTab}
               subjects={subjects}
             />

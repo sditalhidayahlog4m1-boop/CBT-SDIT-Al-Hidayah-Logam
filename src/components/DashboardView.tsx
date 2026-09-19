@@ -51,6 +51,7 @@ import {
   ActiveTab,
   AuthUser,
 } from '../types';
+import { formatExamDisplayDate, getExamResultTimestamp } from '../utils/dateUtils';
 
 interface DashboardViewProps {
   teachers: Teacher[];
@@ -108,12 +109,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const [itemsPerPage, setItemsPerPage] = useState<number>(10);
   const pageSizeOptions = [5, 10, 15, 20, 25, 30, 100, 200, 300, 400, 500];
 
-  // Live real-time ticker that re-renders relative timestamps smoothly every 3 seconds
+  // Live real-time ticker that re-renders relative timestamps smoothly every second
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
   useEffect(() => {
     const timer = setInterval(() => {
       setNowMs(Date.now());
-    }, 3000);
+    }, 1000);
     return () => clearInterval(timer);
   }, []);
 
@@ -145,6 +146,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     { range: '60 - 74 (Cukup)', count: results.filter((r) => r.score >= 60 && r.score < 75).length },
     { range: '< 60 (Perlu Remedial)', count: results.filter((r) => r.score < 60).length },
   ];
+
+  // Most recent completed exams sorted chronologically descending (newest first)
+  const recentResults = useMemo(() => {
+    return [...results]
+      .sort((a, b) => {
+        const timeB = getExamResultTimestamp(b);
+        const timeA = getExamResultTimestamp(a);
+        return timeB - timeA;
+      })
+      .slice(0, 6);
+  }, [results]);
 
   // Pie chart data for pass vs fail
   const pieData =
@@ -390,8 +402,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       const studentResults = results
         .filter((r) => r.studentName && r.studentName.trim().toLowerCase() === studentNameLower)
         .sort((a, b) => {
-          const tB = parseTimestampMs(b.date) || 0;
-          const tA = parseTimestampMs(a.date) || 0;
+          const tB = getExamResultTimestamp(b);
+          const tA = getExamResultTimestamp(a);
           return tB - tA;
         });
       const studentExamCount = studentResults.length;
@@ -429,9 +441,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       } else if (studentDirectLastLogin && studentDirectLastLogin !== '-') {
         lastLoginTime = studentDirectLastLogin;
         rawTimeStr = lastLoginTime;
-      } else if (studentExamCount > 0 && latestExam?.date) {
-        lastLoginTime = `${latestExam.date} (Ujian)`;
-        rawTimeStr = latestExam.date;
+      } else if (studentExamCount > 0 && latestExam) {
+        const examDisplayDate = formatExamDisplayDate(latestExam);
+        lastLoginTime = `${examDisplayDate} (Ujian)`;
+        rawTimeStr = examDisplayDate;
       } else if (studentGameCount > 0 && latestGame) {
         const rawGameTime = latestGame?.timestamp || (latestGame as any)?.playedAt;
         if (rawGameTime && rawGameTime !== 'undefined') {
@@ -443,7 +456,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         }
       }
 
-      const timestampMs = parseTimestampMs(rawTimeStr, matchLog?.lastActiveTimestamp);
+      const examTimestamp = latestExam ? getExamResultTimestamp(latestExam) : undefined;
+      const timestampMs = parseTimestampMs(rawTimeStr, matchLog?.lastActiveTimestamp || examTimestamp);
       const isOnline = isCurrent || Boolean(timestampMs && (nowMs - timestampMs) <= 120000 && matchLog?.status !== 'offline');
       const isIdle = !isOnline && Boolean(timestampMs && (nowMs - timestampMs) <= 600000 && matchLog?.status !== 'offline');
       const relativeTime = getLiveRelativeTime(nowMs, timestampMs, rawTimeStr, isCurrent);
@@ -1437,7 +1451,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <table className="w-full text-left text-xs">
             <thead className="bg-slate-950 text-slate-300 font-bold uppercase tracking-wider border-b border-slate-800">
               <tr>
-                <th className="p-3">Tanggal</th>
+                <th className="p-3">Waktu Selesai (Real-Time)</th>
                 <th className="p-3">Nama Siswa</th>
                 <th className="p-3">Kelas</th>
                 <th className="p-3">Mata Pelajaran</th>
@@ -1446,27 +1460,41 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/80 text-slate-200 font-medium">
-              {results.slice(0, 5).map((r) => (
-                <tr key={r.id} className="hover:bg-slate-800/50 transition-colors">
-                  <td className="p-3 text-slate-400 whitespace-nowrap">{r.date}</td>
-                  <td className="p-3 font-bold text-slate-100">{r.studentName}</td>
-                  <td className="p-3 text-slate-300">{r.classRoom}</td>
-                  <td className="p-3 text-slate-300">{r.subject}</td>
-                  <td className="p-3 text-center font-black text-indigo-400 text-sm">{r.score}</td>
-                  <td className="p-3 text-center">
-                    <span
-                      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${
-                        r.passed
-                          ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
-                          : 'bg-rose-500/10 text-rose-400 border-rose-500/20'
-                      }`}
-                    >
-                      {r.passed ? 'LULUS' : 'REMEDIAL'}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-              {results.length === 0 && (
+              {recentResults.map((r) => {
+                const displayDate = formatExamDisplayDate(r);
+                const timestampMs = getExamResultTimestamp(r);
+                const relativeBadge = getLiveRelativeTime(nowMs, timestampMs, r.date);
+
+                return (
+                  <tr key={r.id} className="hover:bg-slate-800/50 transition-colors">
+                    <td className="p-3 whitespace-nowrap">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-slate-200 font-semibold">{displayDate}</span>
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">
+                          <Clock className="w-2.5 h-2.5 text-indigo-400" />
+                          {relativeBadge}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="p-3 font-bold text-slate-100">{r.studentName}</td>
+                    <td className="p-3 text-slate-300">{r.classRoom}</td>
+                    <td className="p-3 text-slate-300">{r.subject}</td>
+                    <td className="p-3 text-center font-black text-indigo-400 text-sm">{r.score}</td>
+                    <td className="p-3 text-center">
+                      <span
+                        className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${
+                          r.passed
+                            ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                            : 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+                        }`}
+                      >
+                        {r.passed ? 'LULUS' : 'REMEDIAL'}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })}
+              {recentResults.length === 0 && (
                 <tr>
                   <td colSpan={6} className="p-6 text-center text-slate-500">
                     Belum ada riwayat ujian tersimpan.

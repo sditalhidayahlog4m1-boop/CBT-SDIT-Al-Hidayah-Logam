@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   History,
   Download,
@@ -15,6 +15,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CheckSquare,
+  Clock,
 } from 'lucide-react';
 import { ExamResult, QuestionBank, AuthUser } from '../types';
 import { exportExamResultsExcel } from '../utils/exportImport';
@@ -23,6 +24,7 @@ import {
   deleteExamResultsBulkFromFirestore,
   clearAllExamResultsInFirestore,
 } from '../utils/firebaseSync';
+import { formatExamDisplayDate, getExamResultTimestamp, getLiveRelativeTime } from '../utils/dateUtils';
 import { ConfirmModal, ToastContainer, ToastMessage } from './NotificationModal';
 import { useHistoryModal } from '../utils/navigationHistory';
 
@@ -44,6 +46,15 @@ export const ExamHistoryView: React.FC<ExamHistoryViewProps> = ({
   const [selectedClass, setSelectedClass] = useState<string>('ALL');
   const [selectedResult, setSelectedResult] = useState<ExamResult | null>(null);
 
+  // Live real-time ticker for relative timestamps every second
+  const [nowMs, setNowMs] = useState<number>(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setNowMs(Date.now());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
   // Synchronize Exam Result Detail modal with browser history
   useHistoryModal({
     modalId: 'exam-result-detail-modal',
@@ -62,10 +73,9 @@ export const ExamHistoryView: React.FC<ExamHistoryViewProps> = ({
   // - Siswa: only their own exam records
   // - Guru / Admin: all exam records
   const roleFilteredResults = useMemo(() => {
-    if (!currentUser) return results;
-
-    if (isStudent) {
-      return results.filter((result) => {
+    let list = results;
+    if (currentUser && isStudent) {
+      list = results.filter((result) => {
         // 1. Direct match by studentId or userId
         if (currentStudentId && (result.studentId === currentStudentId || result.userId === currentStudentId)) {
           return true;
@@ -82,8 +92,12 @@ export const ExamHistoryView: React.FC<ExamHistoryViewProps> = ({
       });
     }
 
-    // Guru & Admin: show all records
-    return results;
+    // Always sort descending: most recent exams first
+    return [...list].sort((a, b) => {
+      const timeB = getExamResultTimestamp(b);
+      const timeA = getExamResultTimestamp(a);
+      return timeB - timeA;
+    });
   }, [results, currentUser, isStudent, currentStudentId, currentStudentName]);
 
   // Quick statistics for student personal summary
@@ -611,7 +625,7 @@ export const ExamHistoryView: React.FC<ExamHistoryViewProps> = ({
                   </th>
                 )}
                 <th className="p-3.5 w-12 text-center">No</th>
-                <th className="p-3.5">Tanggal & Waktu</th>
+                <th className="p-3.5">Waktu Selesai (Real-Time)</th>
                 {/* For Teachers/Admins: show Student Name and Class */}
                 {!isStudent && (
                   <>
@@ -652,7 +666,15 @@ export const ExamHistoryView: React.FC<ExamHistoryViewProps> = ({
                       </td>
                     )}
                     <td className="p-3.5 text-center font-bold text-slate-500">{rowNumber}</td>
-                    <td className="p-3.5 text-slate-400 font-mono text-[11px] whitespace-nowrap">{r.date}</td>
+                    <td className="p-3.5 whitespace-nowrap">
+                      <div className="flex items-center gap-2">
+                        <span className="text-slate-200 font-mono text-xs font-semibold">{formatExamDisplayDate(r)}</span>
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">
+                          <Clock className="w-2.5 h-2.5 text-indigo-400" />
+                          {getLiveRelativeTime(nowMs, getExamResultTimestamp(r), r.date)}
+                        </span>
+                      </div>
+                    </td>
                     {/* For Teachers/Admins: display student name & class */}
                     {!isStudent && (
                       <>
