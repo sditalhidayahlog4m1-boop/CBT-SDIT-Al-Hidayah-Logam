@@ -143,11 +143,11 @@ export function getStoredBanks(): QuestionBank[] {
     const parsed: QuestionBank[] = JSON.parse(data) || [];
     if (!Array.isArray(parsed)) return [];
 
-    let deletedIds: string[] = ['bank-ext-1787720366170', 'bank-ext-1787717409106'];
+    let deletedIds: string[] = [];
     try {
       const storedDeleted = JSON.parse(localStorage.getItem('cbt_deleted_bank_ids') || '[]');
       if (Array.isArray(storedDeleted)) {
-        deletedIds = Array.from(new Set([...deletedIds, ...storedDeleted]));
+        deletedIds = storedDeleted.map((id) => String(id));
       }
     } catch {}
 

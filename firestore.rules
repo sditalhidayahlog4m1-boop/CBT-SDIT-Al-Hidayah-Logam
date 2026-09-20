@@ -27,6 +27,11 @@ service cloud.firestore {
     match /exam_tokens/{tokenId} {
       allow read, write: if true;
     }
+
+    // Aturan untuk bank soal mandiri (mencegah overflow dokumen master 1MB)
+    match /question_banks/{bankId} {
+      allow read, write: if true;
+    }
     
     // Aturan default untuk koleksi umum lainnya
     match /{document=**} {

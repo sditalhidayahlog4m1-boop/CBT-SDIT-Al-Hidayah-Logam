@@ -19,6 +19,7 @@ import { findMatchingSubject } from '../utils/subjectMatcher';
 import {
   fetchQuestionBankByToken,
   fetchAppDataFromFirestore,
+  fetchAllQuestionBanksFromCloud,
   resetFirestoreQuotaCooldown,
 } from '../utils/firebaseSync';
 
@@ -104,19 +105,25 @@ export const MulaiUjianView: React.FC<MulaiUjianViewProps> = ({
     setSuccessMessage('');
     try {
       resetFirestoreQuotaCooldown();
-      const freshData = await fetchAppDataFromFirestore(false);
-      if (freshData?.banks && freshData.banks.length > 0) {
+      const cloudBanks = await fetchAllQuestionBanksFromCloud();
+      if (cloudBanks && cloudBanks.length > 0) {
         if (onUpdateBanks) {
-          onUpdateBanks(freshData.banks);
+          onUpdateBanks(cloudBanks);
         }
-        setSuccessMessage(`Berhasil menyinkronkan ${freshData.banks.length} paket soal ujian dari server!`);
+        setSuccessMessage(`Berhasil menyinkronkan ${cloudBanks.length} paket soal ujian dari server!`);
       } else {
-        const local = getStoredBanks();
-        if (local.length > 0) {
-          if (onUpdateBanks) onUpdateBanks(local);
-          setSuccessMessage(`Tersedia ${local.length} paket soal ujian di memori perangkat.`);
+        const freshData = await fetchAppDataFromFirestore(false);
+        if (freshData?.banks && freshData.banks.length > 0) {
+          if (onUpdateBanks) onUpdateBanks(freshData.banks);
+          setSuccessMessage(`Berhasil menyinkronkan ${freshData.banks.length} paket soal ujian dari server!`);
         } else {
-          setErrorMessage('Belum ada paket soal ujian yang terdaftar di server.');
+          const local = getStoredBanks();
+          if (local.length > 0) {
+            if (onUpdateBanks) onUpdateBanks(local);
+            setSuccessMessage(`Tersedia ${local.length} paket soal ujian di memori perangkat.`);
+          } else {
+            setErrorMessage('Belum ada paket soal ujian yang terdaftar di server.');
+          }
         }
       }
     } catch {
@@ -146,31 +153,32 @@ export const MulaiUjianView: React.FC<MulaiUjianViewProps> = ({
       return;
     }
 
-    const trimmedToken = tokenInput.trim().toUpperCase();
+    const rawToken = tokenInput.trim();
+    const cleanInputToken = rawToken.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
     setIsVerifying(true);
 
     try {
       // 1. Search in-memory question banks
       let matchedBank = banks.find(
-        (b) => b && b.token && b.token.trim().toUpperCase() === trimmedToken
+        (b) => b && b.token && b.token.replace(/[^A-Za-z0-9]/g, '').toUpperCase() === cleanInputToken
       );
 
       // 2. If not found in-memory, search in local storage
       if (!matchedBank) {
         const localBanks = getStoredBanks();
         matchedBank = localBanks.find(
-          (b) => b && b.token && b.token.trim().toUpperCase() === trimmedToken
+          (b) => b && b.token && b.token.replace(/[^A-Za-z0-9]/g, '').toUpperCase() === cleanInputToken
         );
         if (matchedBank && onUpdateBanks) {
           onUpdateBanks([matchedBank, ...banks.filter((b) => String(b.id) !== String(matchedBank!.id))]);
         }
       }
 
-      // 3. If not found locally, fetch directly from cloud (dedicated 'exam_tokens' collection or app_data)
+      // 3. If not found locally, fetch directly from dedicated 'exam_tokens' or 'question_banks'
       if (!matchedBank) {
         resetFirestoreQuotaCooldown();
         try {
-          const cloudBank = await fetchQuestionBankByToken(trimmedToken);
+          const cloudBank = await fetchQuestionBankByToken(cleanInputToken);
           if (cloudBank) {
             matchedBank = cloudBank;
             if (onUpdateBanks) {
@@ -182,13 +190,30 @@ export const MulaiUjianView: React.FC<MulaiUjianViewProps> = ({
         }
       }
 
-      // 4. Last attempt: fetch full fresh master data from Firestore
+      // 4. Fetch all question banks across all cloud collections
+      if (!matchedBank) {
+        try {
+          const allCloudBanks = await fetchAllQuestionBanksFromCloud();
+          if (allCloudBanks && allCloudBanks.length > 0) {
+            if (onUpdateBanks) {
+              onUpdateBanks(allCloudBanks);
+            }
+            matchedBank = allCloudBanks.find(
+              (b) => b && b.token && b.token.replace(/[^A-Za-z0-9]/g, '').toUpperCase() === cleanInputToken
+            );
+          }
+        } catch (cloudErr) {
+          console.warn('[MulaiUjian] Cloud scan error:', cloudErr);
+        }
+      }
+
+      // 5. Fallback: fetch app_data/main directly
       if (!matchedBank) {
         try {
           const freshData = await fetchAppDataFromFirestore(true);
           if (freshData?.banks) {
             const found = freshData.banks.find(
-              (b) => b && b.token && b.token.trim().toUpperCase() === trimmedToken
+              (b) => b && b.token && b.token.replace(/[^A-Za-z0-9]/g, '').toUpperCase() === cleanInputToken
             );
             if (found) {
               matchedBank = found;
@@ -204,7 +229,7 @@ export const MulaiUjianView: React.FC<MulaiUjianViewProps> = ({
 
       if (!matchedBank) {
         setErrorMessage(
-          `Token ujian "${trimmedToken}" tidak valid atau belum terdaftar. Pastikan token yang Anda masukkan sesuai dengan yang diberikan oleh guru/admin, atau klik tombol "Perbarui / Sinkronkan Soal" di bawah.`
+          `Token ujian "${rawToken}" tidak valid atau belum terdaftar. Pastikan token yang Anda masukkan sesuai dengan yang diberikan oleh guru/admin, atau klik tombol "Perbarui / Sinkronkan Soal" di bawah.`
         );
         setIsVerifying(false);
         return;
@@ -216,7 +241,7 @@ export const MulaiUjianView: React.FC<MulaiUjianViewProps> = ({
         return;
       }
 
-      // If a specific subject is selected, verify or auto-adjust
+      // If a specific subject is selected in dropdown, automatically adapt to matchedBank.subject
       if (selectedSubject !== 'all') {
         const bankSubj = (matchedBank.subject || '').trim().toLowerCase();
         const selSubj = selectedSubject.trim().toLowerCase();
@@ -227,13 +252,8 @@ export const MulaiUjianView: React.FC<MulaiUjianViewProps> = ({
           selSubj.includes(bankSubj) ||
           (matchedReg && matchedReg.name.trim().toLowerCase() === selSubj);
 
-        if (!isMatch) {
+        if (!isMatch && matchedBank.subject) {
           setSelectedSubject(matchedBank.subject);
-          setErrorMessage(
-            `Token "${trimmedToken}" adalah untuk mata pelajaran "${matchedBank.subject}". Pilihan mata pelajaran telah disesuaikan otomatis ke "${matchedBank.subject}". Silakan klik tombol "MULAI MENGERJAKAN UJIAN SEKARANG" sekali lagi untuk memulai.`
-          );
-          setIsVerifying(false);
-          return;
         }
       }
 

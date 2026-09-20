@@ -72,6 +72,7 @@ import {
   fetchAppDataFromFirestore,
   saveAppDataToFirestore,
   saveSingleBankToFirestore,
+  fetchAllQuestionBanksFromCloud,
   resetAllDataInFirestore,
   restoreAllDataInFirestore,
   clearLocallyDeletedBankIds,
@@ -364,8 +365,8 @@ export default function App() {
         const remoteData = await fetchAppDataFromFirestore(true);
         if (remoteData) {
           applyRemoteData(remoteData, false);
-        } else if (!isFirestoreQuotaExhausted()) {
-          // If Firestore is completely fresh/empty and quota is NOT exhausted, seed initial master data
+        } else if (!isFirestoreQuotaExhausted() && banksRef.current.length > 0) {
+          // Only seed initial master data if local client has meaningful banks data
           await saveAppDataToFirestore({
             teachers: teachersRef.current,
             students: studentsRef.current,
@@ -378,6 +379,14 @@ export default function App() {
             adminAccount: getStoredAdminAccount(),
           });
         }
+
+        // Also fetch standalone question banks from dedicated collections to guarantee full cross-device availability
+        try {
+          const cloudBanks = await fetchAllQuestionBanksFromCloud();
+          if (cloudBanks && cloudBanks.length > 0) {
+            applyRemoteData({ banks: cloudBanks }, false);
+          }
+        } catch {}
       } catch (err) {
         console.warn('[Firestore] Initial sync note:', err);
       } finally {
@@ -970,21 +979,27 @@ export default function App() {
       ...newBank,
       updatedAt: newBank.updatedAt || new Date().toISOString(),
     };
+
+    let updatedList: QuestionBank[] = [];
     setBanks((prev) => {
       const exists = prev.some((b) => String(b.id) === String(bankWithTime.id));
       const updated = exists
         ? prev.map((b) => (String(b.id) === String(bankWithTime.id) ? bankWithTime : b))
         : [bankWithTime, ...prev];
+      updatedList = updated;
       saveStoredBanks(updated);
       lastLocalBankEditTimeRef.current = Date.now();
       if (lastSyncedDataRef.current) {
         lastSyncedDataRef.current.banks = updated;
       }
-      broadcastAppDataChange({ banks: updated });
-      saveAppDataToFirestore({ banks: updated });
-      saveSingleBankToFirestore(bankWithTime).catch(() => {});
       return updated;
     });
+
+    // Run async multi-target sync outside updater
+    const payloadBanks = updatedList.length > 0 ? updatedList : [bankWithTime];
+    broadcastAppDataChange({ banks: payloadBanks });
+    saveAppDataToFirestore({ banks: payloadBanks });
+    saveSingleBankToFirestore(bankWithTime).catch(() => {});
   };
 
   // Helper to map tab names to clean Indonesian activity descriptions

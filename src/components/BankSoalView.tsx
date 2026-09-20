@@ -1,5 +1,5 @@
-import React, { useState, useMemo } from 'react';
-import { Database, Search, Eye, Edit2, Edit3, Trash2, Key, Download, BookOpen, Layers, Plus, FileEdit, Copy, Check, Sparkles, RefreshCw, Shuffle, HelpCircle } from 'lucide-react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { Database, Search, Eye, Edit2, Edit3, Trash2, Key, Download, BookOpen, Layers, Plus, FileEdit, Copy, Check, Sparkles, RefreshCw, Shuffle, HelpCircle, Cloud, UploadCloud } from 'lucide-react';
 import { QuestionBank, ActiveTab, Subject } from '../types';
 import { normalizeQuestion } from '../utils/normalizeQuestion';
 import { exportBankToExcel } from '../utils/exportImport';
@@ -14,6 +14,7 @@ import {
   isBankDeletedLocally,
   saveSingleBankToFirestore,
   deleteExamTokenFromFirestore,
+  syncAllLocalBanksToFirestore,
 } from '../utils/firebaseSync';
 import { broadcastAppDataChange } from '../utils/syncEngine';
 import {
@@ -113,6 +114,34 @@ export const BankSoalView: React.FC<BankSoalViewProps> = ({ banks, setBanks, onS
 
   const [deleteConfirmTarget, setDeleteConfirmTarget] = useState<QuestionBank | null>(null);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const [isCloudSyncing, setIsCloudSyncing] = useState<boolean>(false);
+
+  // Auto-sync existing banks and tokens to cloud on mount
+  useEffect(() => {
+    if (banks.length > 0) {
+      syncAllLocalBanksToFirestore(banks).catch(() => {});
+    }
+  }, []);
+
+  const handleSyncAllToCloud = async () => {
+    setIsCloudSyncing(true);
+    try {
+      const res = await syncAllLocalBanksToFirestore(banks);
+      if (res.success) {
+        addToast(
+          'success',
+          `Berhasil menyinkronkan ${res.count} paket soal dan seluruh token ujian ke database server cloud! Siswa dapat langsung menggunakan token di semua perangkat.`,
+          'Sinkronisasi Cloud Berhasil'
+        );
+      } else {
+        addToast('error', 'Gagal menyinkronkan data ke server cloud.', 'Sinkronisasi Gagal');
+      }
+    } catch {
+      addToast('error', 'Terjadi kesalahan saat menyinkronkan ke server.', 'Kesalahan Jaringan');
+    } finally {
+      setIsCloudSyncing(false);
+    }
+  };
 
   const addToast = (type: 'success' | 'error' | 'warning' | 'info', message: string, title?: string) => {
     const id = 'toast-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6);
@@ -196,11 +225,10 @@ export const BankSoalView: React.FC<BankSoalViewProps> = ({ banks, setBanks, onS
 
     if (onSaveBank) {
       onSaveBank(bankWithTimestamp);
-    } else {
-      broadcastAppDataChange({ banks: updated });
-      saveAppDataToFirestore({ banks: updated });
-      saveSingleBankToFirestore(bankWithTimestamp).catch(() => {});
     }
+    broadcastAppDataChange({ banks: updated });
+    saveAppDataToFirestore({ banks: updated });
+    saveSingleBankToFirestore(bankWithTimestamp).catch(() => {});
 
     if (previewBank && String(previewBank.id) === String(bankWithTimestamp.id)) {
       setPreviewBank(bankWithTimestamp);
@@ -377,7 +405,21 @@ export const BankSoalView: React.FC<BankSoalViewProps> = ({ banks, setBanks, onS
           </select>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+          <button
+            onClick={handleSyncAllToCloud}
+            disabled={isCloudSyncing}
+            className="px-3.5 py-2 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all shadow-xs shrink-0 cursor-pointer disabled:opacity-50"
+            title="Sinkronkan seluruh paket soal dan token ujian ke database server cloud (Firestore)"
+          >
+            {isCloudSyncing ? (
+              <RefreshCw className="w-4 h-4 text-emerald-400 animate-spin" />
+            ) : (
+              <UploadCloud className="w-4 h-4 text-emerald-400" />
+            )}
+            <span>{isCloudSyncing ? 'Menyinkronkan...' : 'Sinkronkan ke Cloud'}</span>
+          </button>
+
           {banksNeedingSync.length > 0 && (
             <button
               onClick={handleSyncAllSubjects}
