@@ -71,6 +71,7 @@ import { ResetDataView } from './components/ResetDataView';
 import {
   fetchAppDataFromFirestore,
   saveAppDataToFirestore,
+  saveSingleBankToFirestore,
   resetAllDataInFirestore,
   restoreAllDataInFirestore,
   clearLocallyDeletedBankIds,
@@ -998,6 +999,7 @@ export default function App() {
       }
       broadcastAppDataChange({ banks: updated });
       saveAppDataToFirestore({ banks: updated });
+      saveSingleBankToFirestore(bankWithTime).catch(() => {});
       return updated;
     });
   };
@@ -1543,6 +1545,7 @@ export default function App() {
               subjects={subjects}
               currentUser={currentUser}
               onStartExam={handleStartExam}
+              onUpdateBanks={(updatedBanks) => setBanks(updatedBanks)}
             />
           )}
 

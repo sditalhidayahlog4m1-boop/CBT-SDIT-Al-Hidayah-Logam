@@ -28,14 +28,22 @@ import {
   RolePermissions,
   DailyGradeRecord,
 } from '../types';
-import { SchoolProfile, AdminAccount } from './storage';
+import { SchoolProfile, AdminAccount, getStoredBanks, saveStoredBanks } from './storage';
 import { normalizeExamResults, getExamResultTimestamp } from './dateUtils';
 import firebaseConfigRaw from '../../firebase-applet-config.json';
 
 // Firestore Quota / Resource-Exhausted Circuit Breaker
 let isQuotaExhausted = false;
 let quotaExhaustedUntil = 0;
-const QUOTA_COOLDOWN_MS = 15 * 60 * 1000; // 15 minutes cooldown
+const QUOTA_COOLDOWN_MS = 30 * 1000; // 30 seconds cooldown (prevents long lockout)
+
+export function resetFirestoreQuotaCooldown() {
+  isQuotaExhausted = false;
+  quotaExhaustedUntil = 0;
+  try {
+    localStorage.removeItem('cbt_firestore_quota_until');
+  } catch {}
+}
 
 try {
   const savedQuotaExpiry = localStorage.getItem('cbt_firestore_quota_until');
@@ -207,6 +215,7 @@ const MAIN_DOCUMENT = 'main';
 export const EXAM_RESULTS_COLLECTION = 'exam_results';
 export const GAME_LOGS_COLLECTION = 'game_logs';
 export const LOGIN_LOGS_COLLECTION = 'login_logs';
+export const EXAM_TOKENS_COLLECTION = 'exam_tokens';
 
 /**
  * Fetch full app data from Firestore once:
@@ -279,7 +288,6 @@ export async function fetchAppDataFromFirestore(silent = true): Promise<AppData 
         const item = d.data() as UserLoginLog;
         if (item && item.id && !isLoginLogDeletedLocally(item.id)) {
           if (item.name && item.name.trim().toLowerCase() === 'administrator') {
-            deleteDoc(d.ref).catch(() => {});
             return;
           }
           loginLogsFromCollection.push(item);
@@ -381,12 +389,203 @@ export async function saveAppDataToFirestore(data: Partial<AppData>): Promise<bo
     };
 
     await setDoc(docRef, payload, { merge: true });
+
+    // Multi-account & multi-device sync: Write active banks to dedicated 'exam_tokens' collection
+    if (Array.isArray(masterData.banks) && masterData.banks.length > 0) {
+      try {
+        const batch = writeBatch(db);
+        let tokenCount = 0;
+        masterData.banks.forEach((b) => {
+          if (b && b.token && b.token.trim().length > 0 && !isBankDeletedLocally(b.id)) {
+            const cleanToken = b.token.trim().toUpperCase();
+            const tokenDocRef = doc(db, EXAM_TOKENS_COLLECTION, cleanToken);
+            batch.set(
+              tokenDocRef,
+              {
+                token: cleanToken,
+                bankId: b.id,
+                title: b.title || '',
+                subject: b.subject || '',
+                grade_level: b.grade_level || '',
+                totalQuestions: b.questions?.length || 0,
+                bank: b,
+                updatedAt: b.updatedAt || new Date().toISOString(),
+              },
+              { merge: true }
+            );
+            tokenCount++;
+          }
+        });
+        if (tokenCount > 0) {
+          await batch.commit().catch((err) => {
+            console.warn('[Firestore] Notice batch committing exam tokens:', err);
+          });
+        }
+      } catch (tokenErr) {
+        console.warn('[Firestore] Notice saving exam tokens:', tokenErr);
+      }
+    }
+
     return true;
   } catch (err: any) {
     checkAndHandleFirestoreError(err);
     console.warn('[Firestore] Notice saving master data to cloud:', err?.message || err);
     return false;
   }
+}
+
+/**
+ * Saves or updates a single question bank directly to both 'exam_tokens' collection
+ * and 'app_data/main'. Guarantees instant availability across all student accounts.
+ */
+export async function saveSingleBankToFirestore(bank: QuestionBank): Promise<boolean> {
+  if (!bank || !bank.id) return false;
+  const db = getFirestoreDb();
+  if (!db) return false;
+
+  const cleanToken = (bank.token || '').trim().toUpperCase();
+
+  try {
+    // 1. Direct write to 'exam_tokens' (instant 1-document write, fast token lookup for any student)
+    if (cleanToken) {
+      const tokenDocRef = doc(db, EXAM_TOKENS_COLLECTION, cleanToken);
+      await setDoc(
+        tokenDocRef,
+        {
+          token: cleanToken,
+          bankId: bank.id,
+          title: bank.title || '',
+          subject: bank.subject || '',
+          grade_level: bank.grade_level || '',
+          totalQuestions: bank.questions?.length || 0,
+          bank: bank,
+          updatedAt: bank.updatedAt || new Date().toISOString(),
+        },
+        { merge: true }
+      ).catch((err) => {
+        checkAndHandleFirestoreError(err);
+      });
+    }
+
+    // 2. Merge into app_data/main banks array
+    const mainDocRef = doc(db, MAIN_COLLECTION, MAIN_DOCUMENT);
+    const mainSnap = await getDoc(mainDocRef).catch(() => null);
+    if (mainSnap && mainSnap.exists()) {
+      const mainData = mainSnap.data() as AppData;
+      const existingBanks: QuestionBank[] = Array.isArray(mainData.banks) ? mainData.banks : [];
+      const filtered = existingBanks.filter((b) => b && b.id !== bank.id && !isBankDeletedLocally(b.id));
+      const updatedBanks = [bank, ...filtered];
+      await updateDoc(mainDocRef, {
+        banks: updatedBanks,
+        updatedAt: new Date().toISOString(),
+      }).catch(async () => {
+        await setDoc(mainDocRef, { banks: updatedBanks }, { merge: true }).catch(() => {});
+      });
+    }
+
+    return true;
+  } catch (err: any) {
+    checkAndHandleFirestoreError(err);
+    console.warn('[Firestore] Error in saveSingleBankToFirestore:', err);
+    return false;
+  }
+}
+
+/**
+ * Direct lookup of an exam question bank by Token from:
+ * 1. Local storage
+ * 2. Dedicated 'exam_tokens' collection (1 doc read)
+ * 3. Master 'app_data/main' document
+ * 
+ * Automatically persists to local storage and updates cache if found.
+ */
+export async function fetchQuestionBankByToken(token: string): Promise<QuestionBank | null> {
+  const cleanToken = (token || '').trim().toUpperCase();
+  if (!cleanToken) return null;
+
+  // 1. Check local storage first (instant)
+  try {
+    const localBanks = getStoredBanks();
+    const localMatch = localBanks.find(
+      (b) => b && b.token && b.token.trim().toUpperCase() === cleanToken && !isBankDeletedLocally(b.id)
+    );
+    if (localMatch && localMatch.questions && localMatch.questions.length > 0) {
+      return localMatch;
+    }
+  } catch {}
+
+  const db = getFirestoreDb();
+  if (!db) return null;
+
+  // 2. Fetch directly from dedicated 'exam_tokens' collection (1 lightweight doc read!)
+  try {
+    const tokenDocRef = doc(db, EXAM_TOKENS_COLLECTION, cleanToken);
+    const tokenSnap = await getDoc(tokenDocRef);
+    if (tokenSnap.exists()) {
+      const tokenData = tokenSnap.data();
+      if (tokenData && tokenData.bank) {
+        const cloudBank = tokenData.bank as QuestionBank;
+        if (!isBankDeletedLocally(cloudBank.id)) {
+          // Cache into local storage
+          try {
+            const current = getStoredBanks();
+            const filtered = current.filter((b) => b.id !== cloudBank.id);
+            const merged = [cloudBank, ...filtered];
+            saveStoredBanks(merged);
+          } catch {}
+          return cloudBank;
+        }
+      }
+    }
+  } catch (err) {
+    checkAndHandleFirestoreError(err);
+    console.warn('[Firestore] Token lookup error on exam_tokens:', err);
+  }
+
+  // 3. Fallback: Search inside app_data/main banks array
+  try {
+    const mainDocRef = doc(db, MAIN_COLLECTION, MAIN_DOCUMENT);
+    const mainSnap = await getDoc(mainDocRef);
+    if (mainSnap.exists()) {
+      const mainData = mainSnap.data() as AppData;
+      if (Array.isArray(mainData.banks)) {
+        const found = mainData.banks.find(
+          (b) => b && b.token && b.token.trim().toUpperCase() === cleanToken && !isBankDeletedLocally(b.id)
+        );
+        if (found) {
+          // Self-heal and write to exam_tokens so future lookups are instant
+          setDoc(
+            doc(db, EXAM_TOKENS_COLLECTION, cleanToken),
+            {
+              token: cleanToken,
+              bankId: found.id,
+              title: found.title || '',
+              subject: found.subject || '',
+              grade_level: found.grade_level || '',
+              totalQuestions: found.questions?.length || 0,
+              bank: found,
+              updatedAt: new Date().toISOString(),
+            },
+            { merge: true }
+          ).catch(() => {});
+
+          // Cache locally
+          try {
+            const current = getStoredBanks();
+            const filtered = current.filter((b) => b.id !== found.id);
+            const merged = [found, ...filtered];
+            saveStoredBanks(merged);
+          } catch {}
+          return found;
+        }
+      }
+    }
+  } catch (err) {
+    checkAndHandleFirestoreError(err);
+    console.warn('[Firestore] Token fallback lookup error on app_data/main:', err);
+  }
+
+  return null;
 }
 
 /**
@@ -513,7 +712,6 @@ export function subscribeToAppData(
           const item = d.data() as UserLoginLog;
           if (item && item.id && !isLoginLogDeletedLocally(item.id)) {
             if (item.name && item.name.trim().toLowerCase() === 'administrator') {
-              deleteDoc(d.ref).catch(() => {});
               return;
             }
             list.push(item);
@@ -831,10 +1029,16 @@ export async function trackUserLoginInFirestore(log: UserLoginLog, force = false
   const db = getFirestoreDb();
   if (!db || !log || !log.id) return;
 
+  // Students do NOT send background heartbeat writes to conserve Firestore quota
+  // They only sync on explicit login (force=true) or exam events
+  if (!force && log.role === 'siswa') {
+    return;
+  }
+
   const now = Date.now();
   const lastTime = lastTrackedCloudLogTimes.get(log.id) || 0;
-  // If not forced (e.g. login/logout state change), limit writes to at most once per 3 minutes (180,000 ms)
-  if (!force && now - lastTime < 180000) {
+  // If not forced, throttle writes to at most once per 5 minutes
+  if (!force && now - lastTime < 300000) {
     return;
   }
   lastTrackedCloudLogTimes.set(log.id, now);
@@ -910,38 +1114,24 @@ export async function purgeAdministratorLoginLog(): Promise<void> {
   } catch {}
 
   const db = getFirestoreDb();
-  if (!db) return;
+  if (!db || isFirestoreQuotaExhausted()) return;
 
   try {
-    const snap = await getDocs(collection(db, LOGIN_LOGS_COLLECTION)).catch(() => null);
+    const q = query(
+      collection(db, LOGIN_LOGS_COLLECTION),
+      where('name', '==', 'Administrator'),
+      limit(5)
+    );
+    const snap = await getDocs(q).catch(() => null);
     if (snap && !snap.empty) {
       const batch = writeBatch(db);
-      let count = 0;
       snap.forEach((d) => {
-        const item = d.data() as UserLoginLog;
-        if (item && item.name && item.name.trim().toLowerCase() === 'administrator') {
-          batch.delete(d.ref);
-          count++;
-        }
+        batch.delete(d.ref);
       });
-      if (count > 0) {
-        await batch.commit().catch(() => {});
-      }
-    }
-
-    const mainDocRef = doc(db, MAIN_COLLECTION, MAIN_DOCUMENT);
-    const mainSnap = await getDoc(mainDocRef).catch(() => null);
-    if (mainSnap && mainSnap.exists()) {
-      const mainData = mainSnap.data();
-      if (Array.isArray(mainData.loginLogs)) {
-        const filtered = mainData.loginLogs.filter(
-          (l: any) => l && (!l.name || l.name.trim().toLowerCase() !== 'administrator')
-        );
-        await updateDoc(mainDocRef, { loginLogs: filtered }).catch(() => {});
-      }
+      await batch.commit().catch(() => {});
     }
   } catch (err) {
-    console.warn('[Firestore] Notice cleaning administrator logs:', err);
+    // silent
   }
 }
 

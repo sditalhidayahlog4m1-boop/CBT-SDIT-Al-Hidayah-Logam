@@ -22,6 +22,11 @@ service cloud.firestore {
     match /login_logs/{logId} {
       allow read, write: if true;
     }
+
+    // Aturan untuk token ujian aktif (akses cepat lintas akun dan perangkat)
+    match /exam_tokens/{tokenId} {
+      allow read, write: if true;
+    }
     
     // Aturan default untuk koleksi umum lainnya
     match /{document=**} {
