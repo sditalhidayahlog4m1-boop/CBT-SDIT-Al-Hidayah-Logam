@@ -12,6 +12,8 @@ import {
   deleteBankSoalPermanently,
   recordDeletedBankId,
   isBankDeletedLocally,
+  saveSingleBankToFirestore,
+  deleteExamTokenFromFirestore,
 } from '../utils/firebaseSync';
 import { broadcastAppDataChange } from '../utils/syncEngine';
 import {
@@ -177,6 +179,13 @@ export const BankSoalView: React.FC<BankSoalViewProps> = ({ banks, setBanks, onS
       ...updatedBank,
       updatedAt: new Date().toISOString(),
     };
+
+    const oldToken = editingBank?.token ? editingBank.token.trim().toUpperCase() : '';
+    const newToken = bankWithTimestamp.token ? bankWithTimestamp.token.trim().toUpperCase() : '';
+    if (oldToken && newToken && oldToken !== newToken) {
+      deleteExamTokenFromFirestore(oldToken).catch(() => {});
+    }
+
     const exists = banks.some((b) => String(b.id) === String(bankWithTimestamp.id));
     const updated = exists
       ? banks.map((b) => (String(b.id) === String(bankWithTimestamp.id) ? bankWithTimestamp : b))
@@ -187,10 +196,11 @@ export const BankSoalView: React.FC<BankSoalViewProps> = ({ banks, setBanks, onS
 
     if (onSaveBank) {
       onSaveBank(bankWithTimestamp);
+    } else {
+      broadcastAppDataChange({ banks: updated });
+      saveAppDataToFirestore({ banks: updated });
+      saveSingleBankToFirestore(bankWithTimestamp).catch(() => {});
     }
-
-    broadcastAppDataChange({ banks: updated });
-    saveAppDataToFirestore({ banks: updated });
 
     if (previewBank && String(previewBank.id) === String(bankWithTimestamp.id)) {
       setPreviewBank(bankWithTimestamp);

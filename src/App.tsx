@@ -239,47 +239,48 @@ export default function App() {
       lastSyncedDataRef.current.subjects = data.subjects;
     }
     if (Array.isArray(data.banks)) {
-      const isRecentlyEditedLocally = Date.now() - lastLocalBankEditTimeRef.current < 25000;
-      let mergedBanks = data.banks.filter((b) => b && b.id && !isBankDeletedLocally(b.id));
+      const localBanks = (banksRef.current || []).filter((b) => b && b.id && !isBankDeletedLocally(b.id));
+      const remoteBanks = data.banks.filter((b) => b && b.id && !isBankDeletedLocally(b.id));
 
-      if (isRecentlyEditedLocally) {
-        // Protect locally edited banks from being overwritten by stale remote polling/snapshots
-        const localBanks = (banksRef.current || []).filter((b) => !isBankDeletedLocally(b.id));
-        mergedBanks = mergedBanks.map((remoteB) => {
-          const localB = localBanks.find((l) => l.id === remoteB.id);
-          if (localB) {
-            const localTime = localB.updatedAt ? new Date(localB.updatedAt).getTime() : 0;
-            const remoteTime = remoteB.updatedAt ? new Date(remoteB.updatedAt).getTime() : 0;
-            if (localTime >= remoteTime) {
-              return localB;
-            }
-          }
-          return remoteB;
-        });
+      // Last-Write-Wins conflict resolution per question bank (preserving local edits with newer timestamp)
+      const mergedBanks: QuestionBank[] = [];
+      const processedIds = new Set<string>();
 
-        // Ensure any local banks not yet present in remote are preserved (unless deleted)
-        localBanks.forEach((l) => {
-          if (!isBankDeletedLocally(l.id) && !mergedBanks.some((m) => m.id === l.id)) {
-            mergedBanks.push(l);
+      for (const remoteB of remoteBanks) {
+        const remoteIdStr = String(remoteB.id);
+        const localB = localBanks.find((l) => String(l.id) === remoteIdStr);
+        if (localB) {
+          const localTime = localB.updatedAt ? new Date(localB.updatedAt).getTime() : 0;
+          const remoteTime = remoteB.updatedAt ? new Date(remoteB.updatedAt).getTime() : 0;
+          if (localTime > remoteTime) {
+            // Local bank has newer edits (subject, token, questions, etc.) -> Preserve local bank!
+            mergedBanks.push(localB);
+          } else {
+            // Remote bank is equal or newer -> Use remote bank
+            mergedBanks.push(remoteB);
           }
-        });
+        } else {
+          mergedBanks.push(remoteB);
+        }
+        processedIds.add(remoteIdStr);
       }
 
-      // Auto-normalize bank subjects with registered master subjects
-      const curSubjects = subjectsRef.current || [];
-      if (curSubjects.length > 0) {
-        const { updatedBanks } = autoSyncBanksWithSubjects(mergedBanks, curSubjects);
-        mergedBanks = updatedBanks;
+      // Preserve any local banks not present in remote (unless locally deleted)
+      for (const localB of localBanks) {
+        const localIdStr = String(localB.id);
+        if (!processedIds.has(localIdStr) && !isBankDeletedLocally(localB.id)) {
+          mergedBanks.push(localB);
+          processedIds.add(localIdStr);
+        }
       }
 
-      // Ensure no deleted bank slips through
-      mergedBanks = mergedBanks.filter((b) => b && b.id && !isBankDeletedLocally(b.id));
+      const finalBanks = mergedBanks.filter((b) => b && b.id && !isBankDeletedLocally(b.id));
 
-      if (!isDeepEqual(banksRef.current, mergedBanks)) {
-        setBanks(mergedBanks);
-        saveStoredBanks(mergedBanks);
+      if (!isDeepEqual(banksRef.current, finalBanks)) {
+        setBanks(finalBanks);
+        saveStoredBanks(finalBanks);
         if (lastSyncedDataRef.current) {
-          lastSyncedDataRef.current.banks = mergedBanks;
+          lastSyncedDataRef.current.banks = finalBanks;
         }
       }
     }
@@ -829,26 +830,6 @@ export default function App() {
     }
   }, [banks]);
 
-  // Auto-sync question banks with master registered subjects whenever registered subjects change or on load
-  useEffect(() => {
-    if (subjects.length > 0 && banks.length > 0) {
-      const { updatedBanks, changedCount } = autoSyncBanksWithSubjects(banks, subjects);
-      if (changedCount > 0) {
-        console.log(
-          `[AutoSync] Automatically synchronized ${changedCount} question bank subjects to match Menu Mata Pelajaran`
-        );
-        setBanks(updatedBanks);
-        saveStoredBanks(updatedBanks);
-        lastLocalBankEditTimeRef.current = Date.now();
-        if (lastSyncedDataRef.current) {
-          lastSyncedDataRef.current.banks = updatedBanks;
-        }
-        broadcastAppDataChange({ banks: updatedBanks });
-        saveAppDataToFirestore({ banks: updatedBanks });
-      }
-    }
-  }, [subjects]);
-
   useEffect(() => {
     saveStoredResults(results);
   }, [results]);
@@ -987,11 +968,13 @@ export default function App() {
   const handleSaveBank = (newBank: QuestionBank) => {
     const bankWithTime: QuestionBank = {
       ...newBank,
-      updatedAt: new Date().toISOString(),
+      updatedAt: newBank.updatedAt || new Date().toISOString(),
     };
     setBanks((prev) => {
-      const filtered = prev.filter((b) => String(b.id) !== String(bankWithTime.id));
-      const updated = [bankWithTime, ...filtered];
+      const exists = prev.some((b) => String(b.id) === String(bankWithTime.id));
+      const updated = exists
+        ? prev.map((b) => (String(b.id) === String(bankWithTime.id) ? bankWithTime : b))
+        : [bankWithTime, ...prev];
       saveStoredBanks(updated);
       lastLocalBankEditTimeRef.current = Date.now();
       if (lastSyncedDataRef.current) {

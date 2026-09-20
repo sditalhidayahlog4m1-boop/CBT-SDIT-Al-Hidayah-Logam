@@ -162,7 +162,7 @@ export const MulaiUjianView: React.FC<MulaiUjianViewProps> = ({
           (b) => b && b.token && b.token.trim().toUpperCase() === trimmedToken
         );
         if (matchedBank && onUpdateBanks) {
-          onUpdateBanks([matchedBank, ...banks.filter((b) => b.id !== matchedBank!.id)]);
+          onUpdateBanks([matchedBank, ...banks.filter((b) => String(b.id) !== String(matchedBank!.id))]);
         }
       }
 
@@ -174,7 +174,7 @@ export const MulaiUjianView: React.FC<MulaiUjianViewProps> = ({
           if (cloudBank) {
             matchedBank = cloudBank;
             if (onUpdateBanks) {
-              onUpdateBanks([cloudBank, ...banks.filter((b) => b.id !== cloudBank.id)]);
+              onUpdateBanks([cloudBank, ...banks.filter((b) => String(b.id) !== String(cloudBank.id))]);
             }
           }
         } catch (fetchErr) {

@@ -155,9 +155,7 @@ export function getStoredBanks(): QuestionBank[] {
       (b) =>
         b &&
         b.id &&
-        !deletedIds.includes(b.id) &&
-        b.teacher_name !== 'Guru Pengampu' &&
-        !(b.teacher_name === 'Andi' && b.title === 'Tahsin')
+        !deletedIds.includes(String(b.id))
     );
 
     if (clean.length !== parsed.length) {

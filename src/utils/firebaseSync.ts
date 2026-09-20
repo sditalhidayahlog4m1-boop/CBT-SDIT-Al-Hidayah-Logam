@@ -473,13 +473,15 @@ export async function saveSingleBankToFirestore(bank: QuestionBank): Promise<boo
     if (mainSnap && mainSnap.exists()) {
       const mainData = mainSnap.data() as AppData;
       const existingBanks: QuestionBank[] = Array.isArray(mainData.banks) ? mainData.banks : [];
-      const filtered = existingBanks.filter((b) => b && b.id !== bank.id && !isBankDeletedLocally(b.id));
-      const updatedBanks = [bank, ...filtered];
+      const exists = existingBanks.some((b) => b && String(b.id) === String(bank.id));
+      const updatedBanks = exists
+        ? existingBanks.map((b) => (b && String(b.id) === String(bank.id) ? bank : b))
+        : [bank, ...existingBanks.filter((b) => b && !isBankDeletedLocally(b.id))];
       await updateDoc(mainDocRef, {
-        banks: updatedBanks,
+        banks: updatedBanks.filter((b) => b && b.id && !isBankDeletedLocally(b.id)),
         updatedAt: new Date().toISOString(),
       }).catch(async () => {
-        await setDoc(mainDocRef, { banks: updatedBanks }, { merge: true }).catch(() => {});
+        await setDoc(mainDocRef, { banks: updatedBanks.filter((b) => b && b.id && !isBankDeletedLocally(b.id)) }, { merge: true }).catch(() => {});
       });
     }
 
@@ -487,6 +489,25 @@ export async function saveSingleBankToFirestore(bank: QuestionBank): Promise<boo
   } catch (err: any) {
     checkAndHandleFirestoreError(err);
     console.warn('[Firestore] Error in saveSingleBankToFirestore:', err);
+    return false;
+  }
+}
+
+/**
+ * Permanently removes a token document from 'exam_tokens' collection in Firestore
+ */
+export async function deleteExamTokenFromFirestore(token: string): Promise<boolean> {
+  const cleanToken = (token || '').trim().toUpperCase();
+  if (!cleanToken) return false;
+  const db = getFirestoreDb();
+  if (!db) return false;
+
+  try {
+    const tokenDocRef = doc(db, EXAM_TOKENS_COLLECTION, cleanToken);
+    await deleteDoc(tokenDocRef).catch(() => {});
+    return true;
+  } catch (err) {
+    console.warn('[Firestore] Error in deleteExamTokenFromFirestore:', err);
     return false;
   }
 }
@@ -529,7 +550,7 @@ export async function fetchQuestionBankByToken(token: string): Promise<QuestionB
           // Cache into local storage
           try {
             const current = getStoredBanks();
-            const filtered = current.filter((b) => b.id !== cloudBank.id);
+            const filtered = current.filter((b) => String(b.id) !== String(cloudBank.id));
             const merged = [cloudBank, ...filtered];
             saveStoredBanks(merged);
           } catch {}
@@ -1214,7 +1235,11 @@ export async function deleteSubjectPermanently(subjectId: string, currentSubject
 
 export async function deleteBankSoalPermanently(bankId: string, currentBanks: QuestionBank[]): Promise<QuestionBank[]> {
   recordDeletedBankId(bankId);
-  const updated = currentBanks.filter((b) => b.id !== bankId && !isBankDeletedLocally(b.id));
+  const target = currentBanks.find((b) => String(b.id) === String(bankId));
+  if (target?.token) {
+    deleteExamTokenFromFirestore(target.token).catch(() => {});
+  }
+  const updated = currentBanks.filter((b) => String(b.id) !== String(bankId) && !isBankDeletedLocally(b.id));
   try {
     localStorage.setItem('cbt_banks', JSON.stringify(updated));
   } catch {}
@@ -1223,8 +1248,15 @@ export async function deleteBankSoalPermanently(bankId: string, currentBanks: Qu
 }
 
 export async function deleteBanksBulkPermanently(bankIds: string[], currentBanks: QuestionBank[]): Promise<QuestionBank[]> {
-  bankIds.forEach((id) => recordDeletedBankId(id));
-  const updated = currentBanks.filter((b) => !bankIds.includes(b.id) && !isBankDeletedLocally(b.id));
+  bankIds.forEach((id) => {
+    recordDeletedBankId(id);
+    const target = currentBanks.find((b) => String(b.id) === String(id));
+    if (target?.token) {
+      deleteExamTokenFromFirestore(target.token).catch(() => {});
+    }
+  });
+  const idSet = new Set(bankIds.map((id) => String(id)));
+  const updated = currentBanks.filter((b) => !idSet.has(String(b.id)) && !isBankDeletedLocally(b.id));
   try {
     localStorage.setItem('cbt_banks', JSON.stringify(updated));
   } catch {}
