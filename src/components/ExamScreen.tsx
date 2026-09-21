@@ -18,6 +18,7 @@ import {
   Unlock,
   Maximize2,
   ShieldAlert,
+  Menu,
 } from 'lucide-react';
 import { QuestionBank, ExamResult } from '../types';
 import { normalizeQuestion } from '../utils/normalizeQuestion';
@@ -72,7 +73,8 @@ export const ExamScreen: React.FC<ExamScreenProps> = ({
   const [showScreenSwitchWarning, setShowScreenSwitchWarning] = useState(false);
   const [screenSwitchCount, setScreenSwitchCount] = useState(0);
 
-  const [showMobilePalette, setShowMobilePalette] = useState(false);
+  // Question numbers navigation palette (starts hidden by default upon starting exam, toggled via left hamburger button)
+  const [showQuestionPalette, setShowQuestionPalette] = useState(false);
   const [showUnansweredModal, setShowUnansweredModal] = useState(false);
   const [showMinDurationModal, setShowMinDurationModal] = useState(false);
   const [minDurationInfo, setMinDurationInfo] = useState<{
@@ -198,11 +200,11 @@ export const ExamScreen: React.FC<ExamScreenProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isExamCompleted, isMinTimePassed, minWorkingMinutes, spentMinutes, spentSeconds, waitMinutes, waitSeconds]);
 
-  // Synchronize Mobile Palette drawer with browser history
+  // Synchronize Question Palette drawer with browser history
   useHistoryModal({
-    modalId: 'exam-mobile-palette-modal',
-    isOpen: showMobilePalette,
-    onClose: () => setShowMobilePalette(false),
+    modalId: 'exam-question-palette-drawer',
+    isOpen: showQuestionPalette,
+    onClose: () => setShowQuestionPalette(false),
     tab: 'mulai-ujian',
   });
 
@@ -309,6 +311,14 @@ export const ExamScreen: React.FC<ExamScreenProps> = ({
 
   const currentQuestion = bank.questions[currentIndex];
   const totalQuestions = bank.questions.length;
+
+  const answeredCount = Object.keys(userAnswers).filter(
+    (k) => userAnswers[Number(k)] !== undefined && userAnswers[Number(k)].trim() !== ''
+  ).length;
+  const flaggedCount = Object.keys(flaggedQuestions).filter(
+    (k) => flaggedQuestions[Number(k)]
+  ).length;
+  const unansweredCount = Math.max(0, totalQuestions - answeredCount);
 
   const handleSelectOption = (optionLetter: string) => {
     setUserAnswers((prev) => ({
@@ -491,29 +501,40 @@ export const ExamScreen: React.FC<ExamScreenProps> = ({
   return (
     <div className="fixed inset-0 bg-[#020617] text-slate-100 flex flex-col z-50 overflow-hidden font-sans select-none">
       {/* FOCUS EXAM TOP HEADER */}
-      <header className="h-16 bg-[#0f172a] text-white px-6 flex items-center justify-between shadow-md shrink-0 border-b border-slate-800">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center font-black text-white text-sm">
+      <header className="h-16 bg-[#0f172a] text-white px-3 sm:px-6 flex items-center justify-between shadow-md shrink-0 border-b border-slate-800">
+        <div className="flex items-center gap-2 sm:gap-3">
+          {/* Hamburger Menu button for Question Numbers Navigation */}
+          <button
+            type="button"
+            onClick={() => setShowQuestionPalette((prev) => !prev)}
+            className={`px-2.5 py-1.5 sm:py-2 rounded-xl border transition-all cursor-pointer flex items-center gap-1.5 sm:gap-2 shrink-0 ${
+              showQuestionPalette
+                ? 'bg-indigo-600 text-white border-indigo-500 shadow-md shadow-indigo-600/30 ring-2 ring-indigo-400'
+                : 'bg-slate-800/90 hover:bg-slate-750 text-slate-200 hover:text-white border-slate-700 hover:border-slate-600'
+            }`}
+            title={showQuestionPalette ? 'Tutup Navigasi Nomor Soal' : 'Buka Navigasi Nomor Soal'}
+            aria-label="Navigasi Nomor Soal"
+          >
+            <Menu className="w-5 h-5 text-indigo-400" />
+            <span className="hidden sm:inline text-xs font-bold">Nomor Soal</span>
+            <span className="text-[11px] px-1.5 py-0.5 rounded-md bg-slate-900 text-indigo-300 font-mono font-bold">
+              {currentIndex + 1}/{totalQuestions}
+            </span>
+          </button>
+
+          <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-indigo-600 flex items-center justify-center font-black text-white text-xs sm:text-sm shrink-0">
             CBT
           </div>
           <div>
-            <h1 className="text-sm font-bold leading-tight text-white">{bank.subject}</h1>
-            <p className="text-[11px] text-slate-400">
+            <h1 className="text-xs sm:text-sm font-bold leading-tight text-white line-clamp-1">{bank.subject}</h1>
+            <p className="text-[10px] sm:text-[11px] text-slate-400 truncate max-w-[130px] sm:max-w-xs">
               Peserta: <span className="text-slate-200 font-semibold">{studentName}</span> ({classRoom})
             </p>
           </div>
         </div>
 
-        {/* Timer & Finish & Mobile Grid Toggle */}
+        {/* Timer & Finish Controls */}
         <div className="flex items-center gap-2 sm:gap-3">
-          <button
-            onClick={() => setShowMobilePalette(true)}
-            className="md:hidden px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-indigo-300 font-bold rounded-xl text-xs border border-slate-700 flex items-center gap-1 cursor-pointer"
-            title="Daftar Soal"
-          >
-            <ListOrdered className="w-4 h-4 text-indigo-400" />
-            <span className="text-[11px] font-bold">{currentIndex + 1}/{totalQuestions}</span>
-          </button>
 
           {/* Screen Lock Status Indicator */}
           {!isMinTimePassed ? (
@@ -599,9 +620,15 @@ export const ExamScreen: React.FC<ExamScreenProps> = ({
           {/* Question Number Badge */}
           <div className="flex items-center justify-between border-b border-slate-800 pb-4">
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="px-3 py-1 bg-indigo-600 text-white font-black text-xs rounded-lg shadow-sm">
-                Soal Nomor {currentIndex + 1} / {totalQuestions}
-              </span>
+              <button
+                type="button"
+                onClick={() => setShowQuestionPalette(true)}
+                className="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white font-black text-xs rounded-lg shadow-sm flex items-center gap-1.5 cursor-pointer transition-all"
+                title="Klik untuk membuka navigasi nomor soal"
+              >
+                <Menu className="w-3.5 h-3.5" />
+                <span>Soal Nomor {currentIndex + 1} / {totalQuestions}</span>
+              </button>
               {(() => {
                 const norm = normalizeQuestion(currentQuestion, currentIndex, bank.title || bank.subject);
                 const isEssay = norm.type === 'esai';
@@ -820,107 +847,107 @@ export const ExamScreen: React.FC<ExamScreenProps> = ({
           </div>
         </div>
 
-        {/* QUESTION NAVIGATOR PALETTE SIDEBAR */}
-        <div className="w-72 bg-[#0f172a] border-l border-slate-800 p-5 hidden md:flex flex-col justify-between shrink-0">
-          <div>
-            <h3 className="font-bold text-xs uppercase tracking-wider text-slate-400 mb-4">
-              Navigasi Nomor Soal
-            </h3>
-
-            <div className="grid grid-cols-5 gap-2">
-              {bank.questions.map((q, idx) => {
-                const isAnswered = userAnswers[idx] !== undefined && userAnswers[idx].trim() !== '';
-                const isFlagged = flaggedQuestions[idx];
-                const isCurrent = idx === currentIndex;
-
-                let btnClass = 'bg-slate-800/70 text-slate-300 border-slate-700/80';
-                if (isCurrent) {
-                  btnClass = 'bg-indigo-600 text-white border-indigo-500 ring-2 ring-indigo-400 font-black';
-                } else if (isFlagged) {
-                  btnClass = 'bg-amber-400 text-slate-950 border-amber-500 font-extrabold';
-                } else if (isAnswered) {
-                  btnClass = 'bg-emerald-600 text-white border-emerald-500 font-bold';
-                }
-
-                return (
-                  <button
-                    key={q.id}
-                    onClick={() => setCurrentIndex(idx)}
-                    className={`h-10 rounded-xl border text-xs flex flex-col items-center justify-center transition-all cursor-pointer ${btnClass}`}
-                  >
-                    <span>{idx + 1}</span>
-                    {isAnswered && !isCurrent && (
-                      <span className="text-[9px] font-bold opacity-90">
-                        {userAnswers[idx].length <= 2 ? userAnswers[idx] : '✓'}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Palette Legend */}
-          <div className="pt-4 border-t border-slate-800 space-y-2 text-[11px] text-slate-400">
-            <div className="flex items-center gap-2">
-              <div className="w-3.5 h-3.5 rounded bg-emerald-600 shrink-0" />
-              <span>Sudah Dijawab</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-3.5 h-3.5 rounded bg-amber-400 shrink-0" />
-              <span>Ragu-Ragu</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-3.5 h-3.5 rounded bg-slate-800 border border-slate-700 shrink-0" />
-              <span>Belum Dijawab</span>
-            </div>
-          </div>
-        </div>
       </div>
 
-      {/* MOBILE QUESTION GRID POPUP MODAL */}
-      {showMobilePalette && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 z-50 md:hidden">
-          <div className="bg-[#0f172a] rounded-t-3xl sm:rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4 border border-slate-800 animate-slide-up max-h-[85vh] flex flex-col">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <h3 className="font-bold text-sm text-slate-100 flex items-center gap-2">
-                <ListOrdered className="w-4 h-4 text-indigo-400" />
-                <span>Navigasi Nomor Soal ({totalQuestions} Soal)</span>
-              </h3>
+      {/* FLOATING LEFT HAMBURGER BUTTON (Accessible anywhere along the left edge) */}
+      {!showQuestionPalette && (
+        <button
+          type="button"
+          onClick={() => setShowQuestionPalette(true)}
+          className="fixed left-0 top-1/2 -translate-y-1/2 z-40 bg-[#0f172a]/95 hover:bg-indigo-600 text-slate-300 hover:text-white pl-2 pr-2.5 py-3.5 rounded-r-2xl border border-l-0 border-slate-700 hover:border-indigo-500 shadow-xl shadow-slate-950/80 transition-all flex flex-col items-center gap-2 group cursor-pointer backdrop-blur-xs"
+          title="Klik untuk membuka navigasi nomor soal"
+          aria-label="Buka Navigasi Nomor Soal"
+        >
+          <Menu className="w-4 h-4 text-indigo-400 group-hover:text-white group-hover:scale-110 transition-all" />
+          <span className="text-[10px] font-bold [writing-mode:vertical-lr] rotate-180 tracking-wider text-slate-400 group-hover:text-white">
+            Soal {currentIndex + 1}
+          </span>
+        </button>
+      )}
+
+      {/* LEFT DRAWER: QUESTION NAVIGATOR PALETTE (Hidden by default, opened via left hamburger) */}
+      {showQuestionPalette && (
+        <>
+          {/* Backdrop overlay */}
+          <div
+            className="fixed inset-0 bg-slate-950/75 backdrop-blur-xs z-50 transition-opacity animate-fade-in"
+            onClick={() => setShowQuestionPalette(false)}
+          />
+
+          {/* Left Drawer */}
+          <aside
+            aria-label="Navigasi Nomor Soal"
+            className="fixed inset-y-0 left-0 z-50 w-80 sm:w-88 bg-[#0f172a] border-r border-slate-800 shadow-2xl flex flex-col transition-all duration-200"
+          >
+            {/* Drawer Header */}
+            <div className="h-16 px-5 border-b border-slate-800 flex items-center justify-between shrink-0 bg-slate-900/60">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-indigo-600/20 border border-indigo-500/30 text-indigo-400">
+                  <ListOrdered className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-xs uppercase tracking-wider text-slate-200">
+                    Navigasi Nomor Soal
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    {answeredCount} dari {totalQuestions} Soal Terjawab
+                  </p>
+                </div>
+              </div>
               <button
-                onClick={() => setShowMobilePalette(false)}
-                className="p-1.5 rounded-lg bg-slate-800 text-slate-400 hover:text-white cursor-pointer"
+                type="button"
+                onClick={() => setShowQuestionPalette(false)}
+                className="p-2 rounded-xl bg-slate-800/80 text-slate-400 hover:text-white hover:bg-slate-700 transition-colors cursor-pointer"
+                title="Tutup Navigasi"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto pr-1">
-              <div className="grid grid-cols-5 gap-2">
+            {/* Quick Status Pill Bar */}
+            <div className="px-5 py-3 border-b border-slate-800/80 bg-slate-900/30 grid grid-cols-3 gap-2 text-center text-[10px]">
+              <div className="p-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-bold">
+                {answeredCount} Dijawab
+              </div>
+              <div className="p-1.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400 font-bold">
+                {flaggedCount} Ragu
+              </div>
+              <div className="p-1.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-400 font-bold">
+                {unansweredCount} Belum
+              </div>
+            </div>
+
+            {/* Question Grid */}
+            <div className="flex-1 overflow-y-auto p-5">
+              <div className="grid grid-cols-5 gap-2.5">
                 {bank.questions.map((q, idx) => {
                   const isAnswered = userAnswers[idx] !== undefined && userAnswers[idx].trim() !== '';
                   const isFlagged = flaggedQuestions[idx];
                   const isCurrent = idx === currentIndex;
 
-                  let btnClass = 'bg-slate-800/70 text-slate-300 border-slate-700/80';
+                  let btnClass = 'bg-slate-800/70 text-slate-300 border-slate-700/80 hover:bg-slate-700 hover:border-slate-600';
                   if (isCurrent) {
-                    btnClass = 'bg-indigo-600 text-white border-indigo-500 ring-2 ring-indigo-400 font-black';
+                    btnClass = 'bg-indigo-600 text-white border-indigo-500 ring-2 ring-indigo-400 font-black shadow-md shadow-indigo-600/30';
                   } else if (isFlagged) {
-                    btnClass = 'bg-amber-400 text-slate-950 border-amber-500 font-extrabold';
+                    btnClass = 'bg-amber-400 text-slate-950 border-amber-500 font-extrabold shadow-xs';
                   } else if (isAnswered) {
-                    btnClass = 'bg-emerald-600 text-white border-emerald-500 font-bold';
+                    btnClass = 'bg-emerald-600 text-white border-emerald-500 font-bold shadow-xs';
                   }
 
                   return (
                     <button
                       key={q.id}
+                      type="button"
                       onClick={() => {
                         setCurrentIndex(idx);
-                        setShowMobilePalette(false);
+                        if (window.innerWidth < 640) {
+                          setShowQuestionPalette(false);
+                        }
                       }}
                       className={`h-11 rounded-xl border text-xs flex flex-col items-center justify-center transition-all cursor-pointer ${btnClass}`}
+                      title={`Soal nomor ${idx + 1}${isCurrent ? ' (Sedang dibuka)' : isAnswered ? ' (Sudah dijawab)' : isFlagged ? ' (Ragu-ragu)' : ' (Belum dijawab)'}`}
                     >
-                      <span className="text-sm font-bold">{idx + 1}</span>
+                      <span className="text-xs font-bold">{idx + 1}</span>
                       {isAnswered && !isCurrent && (
                         <span className="text-[9px] font-bold opacity-90">
                           {userAnswers[idx].length <= 2 ? userAnswers[idx] : '✓'}
@@ -932,23 +959,33 @@ export const ExamScreen: React.FC<ExamScreenProps> = ({
               </div>
             </div>
 
-            {/* Mobile Legend */}
-            <div className="pt-3 border-t border-slate-800 flex items-center justify-around text-[10px] text-slate-400">
-              <div className="flex items-center gap-1.5">
-                <div className="w-3 h-3 rounded bg-emerald-600 shrink-0" />
-                <span>Dijawab</span>
+            {/* Drawer Footer: Legend & Close */}
+            <div className="p-4 border-t border-slate-800 bg-slate-900/50 space-y-3 shrink-0">
+              <div className="space-y-1.5 text-[11px] text-slate-400">
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded bg-emerald-600 shrink-0" />
+                  <span>Sudah Dijawab (Hijau)</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded bg-amber-400 shrink-0" />
+                  <span>Ragu-Ragu (Kuning)</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded bg-slate-800 border border-slate-700 shrink-0" />
+                  <span>Belum Dijawab (Abu-abu)</span>
+                </div>
               </div>
-              <div className="flex items-center gap-1.5">
-                <div className="w-3 h-3 rounded bg-amber-400 shrink-0" />
-                <span>Ragu</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <div className="w-3 h-3 rounded bg-slate-800 border border-slate-700 shrink-0" />
-                <span>Belum</span>
-              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowQuestionPalette(false)}
+                className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-xl text-xs font-bold border border-slate-700 transition cursor-pointer"
+              >
+                Tutup Navigasi
+              </button>
             </div>
-          </div>
-        </div>
+          </aside>
+        </>
       )}
 
       {/* FULLSCREEN REQUIRED LOCK MODAL */}
@@ -1104,10 +1141,22 @@ export const ExamScreen: React.FC<ExamScreenProps> = ({
               <strong className="text-slate-100 font-bold">Silakan selesaikan seluruh soal terlebih dahulu sebelum mengakhiri ujian.</strong>
             </p>
 
-            <div className="pt-2">
+            <div className="pt-2 flex flex-col gap-2">
               <button
+                type="button"
+                onClick={() => {
+                  setShowUnansweredModal(false);
+                  setShowQuestionPalette(true);
+                }}
+                className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl text-xs shadow-md shadow-indigo-600/30 transition-all cursor-pointer flex items-center justify-center gap-2"
+              >
+                <ListOrdered className="w-4 h-4" />
+                <span>Buka Navigasi Nomor Soal ({unansweredCount} Belum Dijawab)</span>
+              </button>
+              <button
+                type="button"
                 onClick={() => setShowUnansweredModal(false)}
-                className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-xl text-xs border border-slate-700 transition-all cursor-pointer"
+                className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-xs border border-slate-700 transition-all cursor-pointer"
               >
                 Lanjutkan Mengerjakan Soal
               </button>

@@ -1106,6 +1106,137 @@ app.get("/api/db", (_req, res) => {
   });
 });
 
+// Helper decoders for Firestore REST API
+function decodeFirestoreValue(val: any): any {
+  if (!val || typeof val !== 'object') return val;
+  if ('stringValue' in val) return val.stringValue;
+  if ('integerValue' in val) return parseInt(val.integerValue, 10);
+  if ('doubleValue' in val) return parseFloat(val.doubleValue);
+  if ('booleanValue' in val) return val.booleanValue;
+  if ('timestampValue' in val) return val.timestampValue;
+  if ('nullValue' in val) return null;
+  if ('arrayValue' in val) {
+    const arr = val.arrayValue?.values || [];
+    return arr.map(decodeFirestoreValue);
+  }
+  if ('mapValue' in val) {
+    const fields = val.mapValue?.fields || {};
+    const res: Record<string, any> = {};
+    for (const k of Object.keys(fields)) {
+      res[k] = decodeFirestoreValue(fields[k]);
+    }
+    return res;
+  }
+  return val;
+}
+
+function decodeFirestoreDoc(docObj: any): any {
+  if (!docObj || !docObj.fields) return null;
+  const res: Record<string, any> = {};
+  for (const k of Object.keys(docObj.fields)) {
+    res[k] = decodeFirestoreValue(docObj.fields[k]);
+  }
+  return res;
+}
+
+const FIREBASE_API_KEY = process.env.VITE_FIREBASE_API_KEY || "AIzaSyAHzCYnzqqy99FiW8LTzytktNLufM3MWMI";
+const FIREBASE_PROJECT_ID = process.env.VITE_FIREBASE_PROJECT_ID || "cbt-versi-1";
+
+// Dedicated endpoint to verify and fetch any exam token with zero client SDK dependency
+app.get("/api/exam-token/:token", async (req, res) => {
+  const tokenParam = (req.params.token || "").trim().replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+  if (!tokenParam) {
+    return res.status(400).json({ success: false, message: "Token wajib disertakan" });
+  }
+
+  try {
+    // 1. Look up in exam_tokens collection directly
+    const url1 = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents/exam_tokens/${tokenParam}?key=${FIREBASE_API_KEY}`;
+    const resp1 = await fetch(url1);
+    if (resp1.ok) {
+      const json1 = await resp1.json();
+      const decoded1 = decodeFirestoreDoc(json1);
+      if (decoded1) {
+        const bank = decoded1.bank || decoded1;
+        if (bank && Array.isArray(bank.questions) && bank.questions.length > 0) {
+          return res.json({ success: true, source: "exam_tokens", bank });
+        }
+      }
+    }
+
+    // 2. Scan question_banks collection
+    const url2 = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents/question_banks?key=${FIREBASE_API_KEY}&pageSize=100`;
+    const resp2 = await fetch(url2);
+    if (resp2.ok) {
+      const json2 = await resp2.json();
+      if (Array.isArray(json2.documents)) {
+        for (const docObj of json2.documents) {
+          const decoded = decodeFirestoreDoc(docObj);
+          if (decoded && decoded.token && decoded.token.replace(/[^A-Za-z0-9]/g, "").toUpperCase() === tokenParam) {
+            return res.json({ success: true, source: "question_banks", bank: decoded });
+          }
+        }
+      }
+    }
+
+    // 3. Fallback: Search in app_data/main
+    const url3 = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents/app_data/main?key=${FIREBASE_API_KEY}`;
+    const resp3 = await fetch(url3);
+    if (resp3.ok) {
+      const json3 = await resp3.json();
+      const decoded3 = decodeFirestoreDoc(json3);
+      if (decoded3 && Array.isArray(decoded3.banks)) {
+        const found = decoded3.banks.find(
+          (b: any) => b && b.token && b.token.replace(/[^A-Za-z0-9]/g, "").toUpperCase() === tokenParam
+        );
+        if (found) {
+          return res.json({ success: true, source: "app_data_main", bank: found });
+        }
+      }
+    }
+
+    return res.status(404).json({ success: false, message: `Token ${tokenParam} tidak ditemukan di server` });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: err?.message || "Internal server error" });
+  }
+});
+
+// Endpoint to fetch all active exam question banks
+app.get("/api/exam-banks", async (_req, res) => {
+  try {
+    const list: any[] = [];
+    const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents/question_banks?key=${FIREBASE_API_KEY}&pageSize=100`;
+    const resp = await fetch(url);
+    if (resp.ok) {
+      const json = await resp.json();
+      if (Array.isArray(json.documents)) {
+        for (const docObj of json.documents) {
+          const decoded = decodeFirestoreDoc(docObj);
+          if (decoded && decoded.id && Array.isArray(decoded.questions)) {
+            list.push(decoded);
+          }
+        }
+      }
+    }
+
+    if (list.length === 0) {
+      const urlMain = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents/app_data/main?key=${FIREBASE_API_KEY}`;
+      const respMain = await fetch(urlMain);
+      if (respMain.ok) {
+        const jsonMain = await respMain.json();
+        const decodedMain = decodeFirestoreDoc(jsonMain);
+        if (decodedMain && Array.isArray(decodedMain.banks)) {
+          return res.json({ success: true, banks: decodedMain.banks });
+        }
+      }
+    }
+
+    return res.json({ success: true, banks: list });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: err?.message || "Internal server error" });
+  }
+});
+
 app.get("/api/credentials", (_req, res) => {
   res.json({
     success: true,

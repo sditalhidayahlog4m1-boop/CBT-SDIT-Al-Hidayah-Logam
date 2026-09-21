@@ -83,6 +83,21 @@ export const MulaiUjianView: React.FC<MulaiUjianViewProps> = ({
     }
   }, [currentUser]);
 
+  // Auto-prefetch all cloud exam question banks on mount so verification is instant!
+  useEffect(() => {
+    let isMounted = true;
+    fetchAllQuestionBanksFromCloud()
+      .then((cloudBanks) => {
+        if (isMounted && cloudBanks && cloudBanks.length > 0 && onUpdateBanks) {
+          onUpdateBanks(cloudBanks);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
   // Generate subject list prioritizing master registered subjects from Menu Mata Pelajaran
   const subjectList = React.useMemo(() => {
     if (subjects && subjects.length > 0) {

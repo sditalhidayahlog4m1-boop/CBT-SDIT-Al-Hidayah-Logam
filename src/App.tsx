@@ -1543,7 +1543,10 @@ export default function App() {
               subjects={subjects}
               currentUser={currentUser}
               onStartExam={handleStartExam}
-              onUpdateBanks={(updatedBanks) => setBanks(updatedBanks)}
+              onUpdateBanks={(updatedBanks) => {
+                setBanks(updatedBanks);
+                saveStoredBanks(updatedBanks);
+              }}
             />
           )}
 

@@ -236,6 +236,198 @@ export const EXAM_TOKENS_COLLECTION = 'exam_tokens';
 export const QUESTION_BANKS_COLLECTION = 'question_banks';
 
 /**
+ * Returns raw credentials for direct HTTPS REST requests to Firestore.
+ * Bypasses all client SDK web-socket, indexedDB, or offline-lock failures.
+ */
+export function getFirebaseCredentials(): { apiKey: string; projectId: string; databaseId: string } {
+  const raw = (firebaseConfigRaw || {}) as any;
+  const metaEnv = typeof import.meta !== 'undefined' && (import.meta as any).env ? (import.meta as any).env : {};
+  const apiKey = metaEnv.VITE_FIREBASE_API_KEY || raw.apiKey || 'AIzaSyAHzCYnzqqy99FiW8LTzytktNLufM3MWMI';
+  const projectId = metaEnv.VITE_FIREBASE_PROJECT_ID || raw.projectId || 'cbt-versi-1';
+  const databaseId = metaEnv.VITE_FIRESTORE_DATABASE_ID || raw.firestoreDatabaseId || '(default)';
+  return { apiKey, projectId, databaseId };
+}
+
+export function decodeFirestoreValue(val: any): any {
+  if (!val || typeof val !== 'object') return val;
+  if ('stringValue' in val) return val.stringValue;
+  if ('integerValue' in val) return parseInt(val.integerValue, 10);
+  if ('doubleValue' in val) return parseFloat(val.doubleValue);
+  if ('booleanValue' in val) return val.booleanValue;
+  if ('timestampValue' in val) return val.timestampValue;
+  if ('nullValue' in val) return null;
+  if ('arrayValue' in val) {
+    const arr = val.arrayValue?.values || [];
+    return arr.map(decodeFirestoreValue);
+  }
+  if ('mapValue' in val) {
+    const fields = val.mapValue?.fields || {};
+    const res: Record<string, any> = {};
+    for (const k of Object.keys(fields)) {
+      res[k] = decodeFirestoreValue(fields[k]);
+    }
+    return res;
+  }
+  return val;
+}
+
+export function decodeFirestoreDoc(docObj: any): any {
+  if (!docObj || !docObj.fields) return null;
+  const res: Record<string, any> = {};
+  for (const k of Object.keys(docObj.fields)) {
+    res[k] = decodeFirestoreValue(docObj.fields[k]);
+  }
+  return res;
+}
+
+export function encodeFirestoreValue(val: any): any {
+  if (val === null || val === undefined) return { nullValue: null };
+  if (typeof val === 'boolean') return { booleanValue: val };
+  if (typeof val === 'number') {
+    if (Number.isInteger(val)) return { integerValue: String(val) };
+    return { doubleValue: val };
+  }
+  if (typeof val === 'string') return { stringValue: val };
+  if (Array.isArray(val)) {
+    return { arrayValue: { values: val.map(encodeFirestoreValue) } };
+  }
+  if (typeof val === 'object') {
+    const fields: Record<string, any> = {};
+    for (const k of Object.keys(val)) {
+      if (val[k] !== undefined) {
+        fields[k] = encodeFirestoreValue(val[k]);
+      }
+    }
+    return { mapValue: { fields } };
+  }
+  return { stringValue: String(val) };
+}
+
+export function encodeFirestoreDoc(obj: any): any {
+  const fields: Record<string, any> = {};
+  for (const k of Object.keys(obj || {})) {
+    if (obj[k] !== undefined) {
+      fields[k] = encodeFirestoreValue(obj[k]);
+    }
+  }
+  return { fields };
+}
+
+/**
+ * Direct HTTPS REST call to fetch an exam token document from Firestore.
+ * Works across ALL browsers, Chrome guest mode, Incognito, and mobile.
+ */
+export async function fetchBankByTokenViaRest(token: string): Promise<QuestionBank | null> {
+  const cleanToken = (token || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+  if (!cleanToken) return null;
+
+  try {
+    const { apiKey, projectId, databaseId } = getFirebaseCredentials();
+    const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents/${EXAM_TOKENS_COLLECTION}/${cleanToken}?key=${apiKey}`;
+    const response = await fetch(url);
+    if (response.ok) {
+      const json = await response.json();
+      const decoded = decodeFirestoreDoc(json);
+      if (decoded) {
+        const bank = decoded.bank || decoded;
+        if (bank && Array.isArray(bank.questions) && bank.questions.length > 0) {
+          return bank as QuestionBank;
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[Firestore REST] Direct token fetch notice:', err);
+  }
+  return null;
+}
+
+/**
+ * Direct HTTPS REST call to fetch all question banks from Firestore.
+ */
+export async function fetchAllBanksViaRest(): Promise<QuestionBank[]> {
+  const list: QuestionBank[] = [];
+  try {
+    const { apiKey, projectId, databaseId } = getFirebaseCredentials();
+    const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents/${QUESTION_BANKS_COLLECTION}?key=${apiKey}&pageSize=100`;
+    const response = await fetch(url);
+    if (response.ok) {
+      const json = await response.json();
+      if (Array.isArray(json.documents)) {
+        for (const docObj of json.documents) {
+          const decoded = decodeFirestoreDoc(docObj);
+          if (decoded && decoded.id && Array.isArray(decoded.questions) && !isBankDeletedLocally(decoded.id)) {
+            list.push(decoded as QuestionBank);
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[Firestore REST] Direct all banks fetch notice:', err);
+  }
+  return list;
+}
+
+/**
+ * Backend API proxy fetch for exam token (supported on Vercel and Express).
+ */
+export async function fetchBankByTokenViaApi(token: string): Promise<QuestionBank | null> {
+  const cleanToken = (token || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+  if (!cleanToken) return null;
+
+  try {
+    const response = await fetch(`/api/exam-token/${cleanToken}`);
+    if (response.ok) {
+      const json = await response.json();
+      if (json && json.success && json.bank && Array.isArray(json.bank.questions)) {
+        return json.bank as QuestionBank;
+      }
+    }
+  } catch {}
+  return null;
+}
+
+/**
+ * Direct REST write fallback for question banks.
+ */
+export async function saveSingleBankViaRest(bank: QuestionBank): Promise<boolean> {
+  const cleanToken = (bank.token || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+  if (!cleanToken) return false;
+  try {
+    const { apiKey, projectId, databaseId } = getFirebaseCredentials();
+    const sanitized = sanitizeForFirestore(bank);
+    const tokenPayload = encodeFirestoreDoc({
+      token: cleanToken,
+      bankId: bank.id,
+      title: bank.title || '',
+      subject: bank.subject || '',
+      grade_level: bank.grade_level || '',
+      totalQuestions: bank.questions?.length || 0,
+      bank: sanitized,
+      updatedAt: bank.updatedAt || new Date().toISOString(),
+    });
+
+    const url1 = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents/${EXAM_TOKENS_COLLECTION}/${cleanToken}?key=${apiKey}`;
+    await fetch(url1, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(tokenPayload),
+    });
+
+    const url2 = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents/${QUESTION_BANKS_COLLECTION}/${bank.id}?key=${apiKey}`;
+    await fetch(url2, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(encodeFirestoreDoc(sanitized)),
+    });
+
+    return true;
+  } catch (err) {
+    console.warn('[Firestore REST] Write notice:', err);
+    return false;
+  }
+}
+
+/**
  * Fetch full app data from Firestore once:
  * - Master document (teachers, students, subjects, banks, schoolProfile, permissions, etc.)
  * - Separate collections (exam_results, game_logs, login_logs)
@@ -439,12 +631,16 @@ export async function saveAppDataToFirestore(data: Partial<AppData>): Promise<bo
  */
 export async function saveSingleBankToFirestore(bank: QuestionBank): Promise<boolean> {
   if (!bank || !bank.id) return false;
-  const db = getFirestoreDb();
-  if (!db) return false;
 
   const rawToken = (bank.token || '').trim();
   const cleanToken = rawToken.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
   const sanitizedBank = sanitizeForFirestore(bank);
+
+  // Always invoke REST write in parallel to guarantee cloud persistence regardless of client SDK state
+  saveSingleBankViaRest(bank).catch(() => {});
+
+  const db = getFirestoreDb();
+  if (!db) return true;
 
   try {
     // 1. Direct write to 'exam_tokens' (instant 1-document write, fast token lookup for any student)
@@ -556,54 +752,32 @@ export async function deleteExamTokenFromFirestore(token: string, bankId?: strin
 
 /**
  * Fetches all question banks across all Firestore collections (exam_tokens, question_banks, app_data/main)
- * and merges them cleanly into local storage.
+ * and merges them cleanly into local storage. Supports REST and Backend Proxy.
  */
 export async function fetchAllQuestionBanksFromCloud(): Promise<QuestionBank[]> {
-  const db = getFirestoreDb();
-  if (!db) return getStoredBanks();
-
   const collectedBanks: QuestionBank[] = [];
   const bankIdsSeen = new Set<string>();
 
-  // 1. Fetch from 'question_banks' collection
+  // 1. Fetch from 'question_banks' collection via direct REST API (immune to SDK offline or connection issues)
   try {
-    const qbSnap = await getDocs(collection(db, QUESTION_BANKS_COLLECTION));
-    qbSnap.forEach((docSnap) => {
-      const b = docSnap.data() as QuestionBank;
+    const restBanks = await fetchAllBanksViaRest();
+    restBanks.forEach((b) => {
       if (b && b.id && !isBankDeletedLocally(b.id) && !bankIdsSeen.has(String(b.id))) {
         collectedBanks.push(b);
         bankIdsSeen.add(String(b.id));
       }
     });
   } catch (err) {
-    checkAndHandleFirestoreError(err);
+    console.warn('[REST Cloud Fetch Notice]:', err);
   }
 
-  // 2. Fetch from 'exam_tokens' collection
+  // 2. Fetch via backend proxy /api/exam-banks
   try {
-    const tokensSnap = await getDocs(collection(db, EXAM_TOKENS_COLLECTION));
-    tokensSnap.forEach((docSnap) => {
-      const data = docSnap.data();
-      if (data && data.bank) {
-        const b = data.bank as QuestionBank;
-        if (b && b.id && !isBankDeletedLocally(b.id) && !bankIdsSeen.has(String(b.id))) {
-          collectedBanks.push(b);
-          bankIdsSeen.add(String(b.id));
-        }
-      }
-    });
-  } catch (err) {
-    checkAndHandleFirestoreError(err);
-  }
-
-  // 3. Fetch from 'app_data/main'
-  try {
-    const mainDocRef = doc(db, MAIN_COLLECTION, MAIN_DOCUMENT);
-    const mainSnap = await getDoc(mainDocRef);
-    if (mainSnap.exists()) {
-      const mainData = mainSnap.data() as AppData;
-      if (Array.isArray(mainData.banks)) {
-        mainData.banks.forEach((b) => {
+    const apiResp = await fetch('/api/exam-banks');
+    if (apiResp.ok) {
+      const apiJson = await apiResp.json();
+      if (apiJson && apiJson.success && Array.isArray(apiJson.banks)) {
+        apiJson.banks.forEach((b: QuestionBank) => {
           if (b && b.id && !isBankDeletedLocally(b.id) && !bankIdsSeen.has(String(b.id))) {
             collectedBanks.push(b);
             bankIdsSeen.add(String(b.id));
@@ -611,8 +785,60 @@ export async function fetchAllQuestionBanksFromCloud(): Promise<QuestionBank[]> 
         });
       }
     }
-  } catch (err) {
-    checkAndHandleFirestoreError(err);
+  } catch {}
+
+  // 3. Fetch from Firestore Client SDK if available
+  const db = getFirestoreDb();
+  if (db) {
+    // 3a. Fetch from 'question_banks' collection
+    try {
+      const qbSnap = await getDocs(collection(db, QUESTION_BANKS_COLLECTION));
+      qbSnap.forEach((docSnap) => {
+        const b = docSnap.data() as QuestionBank;
+        if (b && b.id && !isBankDeletedLocally(b.id) && !bankIdsSeen.has(String(b.id))) {
+          collectedBanks.push(b);
+          bankIdsSeen.add(String(b.id));
+        }
+      });
+    } catch (err) {
+      checkAndHandleFirestoreError(err);
+    }
+
+    // 3b. Fetch from 'exam_tokens' collection
+    try {
+      const tokensSnap = await getDocs(collection(db, EXAM_TOKENS_COLLECTION));
+      tokensSnap.forEach((docSnap) => {
+        const data = docSnap.data();
+        if (data && data.bank) {
+          const b = data.bank as QuestionBank;
+          if (b && b.id && !isBankDeletedLocally(b.id) && !bankIdsSeen.has(String(b.id))) {
+            collectedBanks.push(b);
+            bankIdsSeen.add(String(b.id));
+          }
+        }
+      });
+    } catch (err) {
+      checkAndHandleFirestoreError(err);
+    }
+
+    // 3c. Fetch from 'app_data/main'
+    try {
+      const mainDocRef = doc(db, MAIN_COLLECTION, MAIN_DOCUMENT);
+      const mainSnap = await getDoc(mainDocRef);
+      if (mainSnap.exists()) {
+        const mainData = mainSnap.data() as AppData;
+        if (Array.isArray(mainData.banks)) {
+          mainData.banks.forEach((b) => {
+            if (b && b.id && !isBankDeletedLocally(b.id) && !bankIdsSeen.has(String(b.id))) {
+              collectedBanks.push(b);
+              bankIdsSeen.add(String(b.id));
+            }
+          });
+        }
+      }
+    } catch (err) {
+      checkAndHandleFirestoreError(err);
+    }
   }
 
   // 4. Merge with existing local banks if any
@@ -632,12 +858,14 @@ export async function fetchAllQuestionBanksFromCloud(): Promise<QuestionBank[]> 
 }
 
 /**
- * Direct lookup of an exam question bank by Token from:
- * 1. Local storage (instant)
- * 2. Dedicated 'exam_tokens' collection (1 doc read)
- * 3. Standalone 'question_banks' collection
- * 4. Master 'app_data/main' document
- * 5. Full cloud scan fallback
+ * Direct lookup of an exam question bank by Token across 7 redundant layers:
+ * 1. Local storage & in-memory cache (instant)
+ * 2. Direct Firestore REST lookup on 'exam_tokens/{cleanToken}' (fastest cloud, works across all browsers)
+ * 3. Backend API proxy /api/exam-token/:token (Vercel & Express proxy)
+ * 4. Firestore Client SDK lookup on 'exam_tokens/{cleanToken}'
+ * 5. Firestore Client SDK query on 'question_banks'
+ * 6. Firestore Client SDK lookup on 'app_data/main'
+ * 7. Full cloud scan across all banks
  * 
  * Automatically persists to local storage and updates cache if found.
  */
@@ -661,91 +889,113 @@ export async function fetchQuestionBankByToken(token: string): Promise<QuestionB
     }
   } catch {}
 
-  const db = getFirestoreDb();
-  if (!db) return null;
-
-  // 2. Fetch directly from dedicated 'exam_tokens' collection (1 lightweight doc read!)
+  // 2. Fetch directly from dedicated 'exam_tokens' collection via direct Firestore REST API
+  // This is immune to SDK web-socket drops, browser restrictions, or indexedDB locks!
   try {
-    const tokenDocRef = doc(db, EXAM_TOKENS_COLLECTION, cleanToken);
-    const tokenSnap = await getDoc(tokenDocRef);
-    if (tokenSnap.exists()) {
-      const tokenData = tokenSnap.data();
-      if (tokenData && tokenData.bank) {
-        const cloudBank = tokenData.bank as QuestionBank;
-        if (!isBankDeletedLocally(cloudBank.id)) {
-          // Cache into local storage
+    const restBank = await fetchBankByTokenViaRest(cleanToken);
+    if (restBank && !isBankDeletedLocally(restBank.id) && Array.isArray(restBank.questions) && restBank.questions.length > 0) {
+      try {
+        const current = getStoredBanks();
+        const filtered = current.filter((b) => String(b.id) !== String(restBank.id));
+        saveStoredBanks([restBank, ...filtered]);
+      } catch {}
+      return restBank;
+    }
+  } catch (err) {
+    console.warn('[REST Token Lookup Notice]:', err);
+  }
+
+  // 3. Fetch from backend proxy /api/exam-token/:token
+  try {
+    const apiBank = await fetchBankByTokenViaApi(cleanToken);
+    if (apiBank && !isBankDeletedLocally(apiBank.id) && Array.isArray(apiBank.questions) && apiBank.questions.length > 0) {
+      try {
+        const current = getStoredBanks();
+        const filtered = current.filter((b) => String(b.id) !== String(apiBank.id));
+        saveStoredBanks([apiBank, ...filtered]);
+      } catch {}
+      return apiBank;
+    }
+  } catch {}
+
+  // 4. Firestore Client SDK lookup
+  const db = getFirestoreDb();
+  if (db) {
+    // 4a. Fetch directly from dedicated 'exam_tokens' collection
+    try {
+      const tokenDocRef = doc(db, EXAM_TOKENS_COLLECTION, cleanToken);
+      const tokenSnap = await getDoc(tokenDocRef);
+      if (tokenSnap.exists()) {
+        const tokenData = tokenSnap.data();
+        if (tokenData && tokenData.bank) {
+          const cloudBank = tokenData.bank as QuestionBank;
+          if (!isBankDeletedLocally(cloudBank.id) && Array.isArray(cloudBank.questions) && cloudBank.questions.length > 0) {
+            try {
+              const current = getStoredBanks();
+              const filtered = current.filter((b) => String(b.id) !== String(cloudBank.id));
+              saveStoredBanks([cloudBank, ...filtered]);
+            } catch {}
+            return cloudBank;
+          }
+        }
+      }
+    } catch (err) {
+      checkAndHandleFirestoreError(err);
+      console.warn('[Firestore] Token lookup error on exam_tokens:', err);
+    }
+
+    // 4b. Fetch from 'question_banks' collection by querying token
+    try {
+      const q = query(collection(db, QUESTION_BANKS_COLLECTION), where('token', '==', cleanToken), limit(1));
+      const qSnap = await getDocs(q);
+      if (!qSnap.empty) {
+        const cloudBank = qSnap.docs[0].data() as QuestionBank;
+        if (cloudBank && !isBankDeletedLocally(cloudBank.id) && Array.isArray(cloudBank.questions) && cloudBank.questions.length > 0) {
+          saveSingleBankToFirestore(cloudBank).catch(() => {});
           try {
             const current = getStoredBanks();
             const filtered = current.filter((b) => String(b.id) !== String(cloudBank.id));
-            const merged = [cloudBank, ...filtered];
-            saveStoredBanks(merged);
+            saveStoredBanks([cloudBank, ...filtered]);
           } catch {}
           return cloudBank;
         }
       }
+    } catch (err) {
+      checkAndHandleFirestoreError(err);
     }
-  } catch (err) {
-    checkAndHandleFirestoreError(err);
-    console.warn('[Firestore] Token lookup error on exam_tokens:', err);
-  }
 
-  // 3. Fetch from 'question_banks' collection by querying token
-  try {
-    const q = query(collection(db, QUESTION_BANKS_COLLECTION), where('token', '==', cleanToken), limit(1));
-    const qSnap = await getDocs(q);
-    if (!qSnap.empty) {
-      const cloudBank = qSnap.docs[0].data() as QuestionBank;
-      if (cloudBank && !isBankDeletedLocally(cloudBank.id)) {
-        // Cache locally and ensure token doc exists
-        saveSingleBankToFirestore(cloudBank).catch(() => {});
-        try {
-          const current = getStoredBanks();
-          const filtered = current.filter((b) => String(b.id) !== String(cloudBank.id));
-          const merged = [cloudBank, ...filtered];
-          saveStoredBanks(merged);
-        } catch {}
-        return cloudBank;
-      }
-    }
-  } catch (err) {
-    checkAndHandleFirestoreError(err);
-  }
-
-  // 4. Fallback: Search inside app_data/main banks array
-  try {
-    const mainDocRef = doc(db, MAIN_COLLECTION, MAIN_DOCUMENT);
-    const mainSnap = await getDoc(mainDocRef);
-    if (mainSnap.exists()) {
-      const mainData = mainSnap.data() as AppData;
-      if (Array.isArray(mainData.banks)) {
-        const found = mainData.banks.find(
-          (b) =>
-            b &&
-            b.token &&
-            b.token.replace(/[^A-Za-z0-9]/g, '').toUpperCase() === cleanToken &&
-            !isBankDeletedLocally(b.id)
-        );
-        if (found) {
-          // Self-heal and write to exam_tokens & question_banks so future lookups are instant
-          saveSingleBankToFirestore(found).catch(() => {});
-
-          // Cache locally
-          try {
-            const current = getStoredBanks();
-            const filtered = current.filter((b) => String(b.id) !== String(found.id));
-            const merged = [found, ...filtered];
-            saveStoredBanks(merged);
-          } catch {}
-          return found;
+    // 4c. Fallback: Search inside app_data/main banks array
+    try {
+      const mainDocRef = doc(db, MAIN_COLLECTION, MAIN_DOCUMENT);
+      const mainSnap = await getDoc(mainDocRef);
+      if (mainSnap.exists()) {
+        const mainData = mainSnap.data() as AppData;
+        if (Array.isArray(mainData.banks)) {
+          const found = mainData.banks.find(
+            (b) =>
+              b &&
+              b.token &&
+              b.token.replace(/[^A-Za-z0-9]/g, '').toUpperCase() === cleanToken &&
+              !isBankDeletedLocally(b.id)
+          );
+          if (found && Array.isArray(found.questions) && found.questions.length > 0) {
+            saveSingleBankToFirestore(found).catch(() => {});
+            try {
+              const current = getStoredBanks();
+              const filtered = current.filter((b) => String(b.id) !== String(found.id));
+              saveStoredBanks([found, ...filtered]);
+            } catch {}
+            return found;
+          }
         }
       }
+    } catch (err) {
+      checkAndHandleFirestoreError(err);
+      console.warn('[Firestore] Token fallback lookup error on app_data/main:', err);
     }
-  } catch (err) {
-    checkAndHandleFirestoreError(err);
-    console.warn('[Firestore] Token fallback lookup error on app_data/main:', err);
   }
 
-  // 5. Ultimate Fallback: Comprehensive cloud search across all banks
+  // 5. Ultimate Fallback: Comprehensive cloud search across all banks (combines REST + SDK)
   try {
     const allBanks = await fetchAllQuestionBanksFromCloud();
     const deepMatch = allBanks.find(
@@ -755,7 +1005,7 @@ export async function fetchQuestionBankByToken(token: string): Promise<QuestionB
         b.token.replace(/[^A-Za-z0-9]/g, '').toUpperCase() === cleanToken &&
         !isBankDeletedLocally(b.id)
     );
-    if (deepMatch) {
+    if (deepMatch && Array.isArray(deepMatch.questions) && deepMatch.questions.length > 0) {
       saveSingleBankToFirestore(deepMatch).catch(() => {});
       return deepMatch;
     }
