@@ -50,6 +50,7 @@ import {
   UserLoginLog,
   ActiveTab,
   AuthUser,
+  PresenceSummary,
 } from '../types';
 import { formatExamDisplayDate, getExamResultTimestamp } from '../utils/dateUtils';
 
@@ -64,6 +65,8 @@ interface DashboardViewProps {
   setActiveTab: (tab: ActiveTab) => void;
   currentUser?: AuthUser | null;
   onOpenLoginModal?: () => void;
+  presenceSummary?: PresenceSummary | null;
+  onOpenPresenceModal?: () => void;
 }
 
 interface UserAccountStatus {
@@ -87,6 +90,8 @@ interface UserAccountStatus {
   gameCount: number;
   latestScore?: number;
   isCurrentSessionUser?: boolean;
+  device?: string;
+  isMultiDevice?: boolean;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
@@ -100,6 +105,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   setActiveTab,
   currentUser,
   onOpenLoginModal,
+  presenceSummary,
+  onOpenPresenceModal,
 }) => {
   const [activeRoleFilter, setActiveRoleFilter] = useState<'all' | 'guru' | 'siswa' | 'admin'>('all');
   const [activeStatusFilter, setActiveStatusFilter] = useState<'all' | 'online' | 'logged' | 'ujian' | 'just_logged' | 'not_logged'>('all');
@@ -303,8 +310,20 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         (teacherNip && (currentUser.username === teacherNip || currentUser.details?.nip === teacherNip))
       );
 
+      const matchPresenceSession = presenceSummary?.sessions?.find((sess) => {
+        const sessName = sess.name.trim().toLowerCase();
+        const sessId = (sess.identifier || '').trim().toLowerCase();
+        return (
+          sessName === teacherNameLower ||
+          (teacherNip && sessId === teacherNip.toLowerCase()) ||
+          (teacherNuptk && sessId === teacherNuptk.toLowerCase()) ||
+          (teacherUsername && sessId === teacherUsername)
+        );
+      });
+
       const teacherDirectLastLogin = t.lastLogin?.trim();
       const isLoggedIn = Boolean(
+        matchPresenceSession ||
         matchLog ||
         isCurrent ||
         (teacherDirectLastLogin && teacherDirectLastLogin !== '-')
@@ -313,6 +332,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       let lastLoginTime: string | undefined = undefined;
       if (isCurrent) {
         lastLoginTime = 'Sedang Aktif';
+      } else if (matchPresenceSession?.loginTime) {
+        lastLoginTime = matchPresenceSession.loginTime;
       } else if (matchLog?.lastSeenTime || matchLog?.loginTime) {
         lastLoginTime = matchLog.lastSeenTime || matchLog.loginTime;
       } else if (teacherDirectLastLogin && teacherDirectLastLogin !== '-') {
@@ -320,22 +341,27 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       }
 
       const timestampMs = parseTimestampMs(
-        matchLog?.lastSeenTime || matchLog?.loginTime || teacherDirectLastLogin,
-        matchLog?.lastActiveTimestamp
+        matchPresenceSession?.loginTime || matchLog?.lastSeenTime || matchLog?.loginTime || teacherDirectLastLogin,
+        matchPresenceSession?.lastPing || matchLog?.lastActiveTimestamp
       );
-      const isOnline = isCurrent || Boolean(timestampMs && (nowMs - timestampMs) <= 120000 && matchLog?.status !== 'offline');
+      const isOnline = isCurrent || Boolean(matchPresenceSession) || Boolean(timestampMs && (nowMs - timestampMs) <= 120000 && matchLog?.status !== 'offline');
       const isIdle = !isOnline && Boolean(timestampMs && (nowMs - timestampMs) <= 600000 && matchLog?.status !== 'offline');
-      const relativeTime = getLiveRelativeTime(
-        nowMs,
-        timestampMs,
-        matchLog?.lastSeenTime || matchLog?.loginTime || teacherDirectLastLogin,
-        isCurrent
-      );
+      const relativeTime = matchPresenceSession
+        ? 'Online (Server)'
+        : getLiveRelativeTime(
+            nowMs,
+            timestampMs,
+            matchLog?.lastSeenTime || matchLog?.loginTime || teacherDirectLastLogin,
+            isCurrent
+          );
 
       let currentActivity = 'Belum Pernah Masuk';
       let activityDetails = 'Belum ada riwayat aktivitas';
 
-      if (matchLog?.currentActivity) {
+      if (matchPresenceSession?.currentActivity) {
+        currentActivity = matchPresenceSession.currentActivity;
+        activityDetails = matchPresenceSession.activityDetails || (isCurrent ? 'Aktif Sekarang' : 'Guru SDIT Al Hidayah');
+      } else if (matchLog?.currentActivity) {
         currentActivity = matchLog.currentActivity;
         activityDetails = matchLog.activityDetails || (isCurrent ? 'Aktif Sekarang' : 'Guru SDIT Al Hidayah');
       } else if (isCurrent) {
@@ -368,6 +394,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         examCount: 0,
         gameCount: 0,
         isCurrentSessionUser: isCurrent,
+        device: matchPresenceSession?.device,
+        isMultiDevice: matchPresenceSession?.isMultiDeviceLogin,
       });
     });
 
@@ -419,10 +447,22 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       const studentGameCount = studentGameLogs.length;
       const latestGame = studentGameLogs[0];
 
+      const matchPresenceSession = presenceSummary?.sessions?.find((sess) => {
+        const sessName = sess.name.trim().toLowerCase();
+        const sessId = (sess.identifier || '').trim().toLowerCase();
+        return (
+          sessName === studentNameLower ||
+          (studentNisn && sessId === studentNisn.toLowerCase()) ||
+          (studentNis && sessId === studentNis.toLowerCase()) ||
+          (studentUsername && sessId === studentUsername)
+        );
+      });
+
       const studentDirectLastLogin = s.lastLogin?.trim();
 
       // If student logged in, even with 0 exams and 0 games, they are detected as logged in!
       const isLoggedIn = Boolean(
+        matchPresenceSession ||
         matchLog ||
         isCurrent ||
         (studentDirectLastLogin && studentDirectLastLogin !== '-') ||
@@ -435,6 +475,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
       if (isCurrent) {
         lastLoginTime = 'Sedang Aktif';
+      } else if (matchPresenceSession?.loginTime) {
+        lastLoginTime = matchPresenceSession.loginTime;
+        rawTimeStr = lastLoginTime;
       } else if (matchLog?.lastSeenTime || matchLog?.loginTime) {
         lastLoginTime = matchLog.lastSeenTime || matchLog.loginTime;
         rawTimeStr = lastLoginTime;
@@ -457,15 +500,23 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       }
 
       const examTimestamp = latestExam ? getExamResultTimestamp(latestExam) : undefined;
-      const timestampMs = parseTimestampMs(rawTimeStr, matchLog?.lastActiveTimestamp || examTimestamp);
-      const isOnline = isCurrent || Boolean(timestampMs && (nowMs - timestampMs) <= 120000 && matchLog?.status !== 'offline');
+      const timestampMs = parseTimestampMs(
+        rawTimeStr,
+        matchPresenceSession?.lastPing || matchLog?.lastActiveTimestamp || examTimestamp
+      );
+      const isOnline = isCurrent || Boolean(matchPresenceSession) || Boolean(timestampMs && (nowMs - timestampMs) <= 120000 && matchLog?.status !== 'offline');
       const isIdle = !isOnline && Boolean(timestampMs && (nowMs - timestampMs) <= 600000 && matchLog?.status !== 'offline');
-      const relativeTime = getLiveRelativeTime(nowMs, timestampMs, rawTimeStr, isCurrent);
+      const relativeTime = matchPresenceSession
+        ? 'Online (Server)'
+        : getLiveRelativeTime(nowMs, timestampMs, rawTimeStr, isCurrent);
 
       let currentActivity = 'Belum Pernah Masuk';
       let activityDetails = 'Belum ada riwayat aktivitas';
 
-      if (matchLog?.currentActivity) {
+      if (matchPresenceSession?.currentActivity) {
+        currentActivity = matchPresenceSession.currentActivity;
+        activityDetails = matchPresenceSession.activityDetails || '';
+      } else if (matchLog?.currentActivity) {
         currentActivity = matchLog.currentActivity;
         activityDetails = matchLog.activityDetails || '';
       } else if (isCurrent) {
@@ -505,6 +556,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         gameCount: studentGameCount,
         latestScore: latestExam?.score,
         isCurrentSessionUser: isCurrent,
+        device: matchPresenceSession?.device,
+        isMultiDevice: matchPresenceSession?.isMultiDeviceLogin,
       });
     });
 
@@ -546,6 +599,40 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       }
     });
 
+    // 4. Process any extra active presence sessions detected by server
+    presenceSummary?.sessions?.forEach((sess) => {
+      if (!sess || !sess.name) return;
+      if (sess.name.trim().toLowerCase() === 'administrator') return;
+
+      const key = `${sess.role}-${sess.name.trim().toLowerCase()}`;
+      if (!processedKeys.has(key)) {
+        processedKeys.add(key);
+
+        list.push({
+          id: sess.sessionId,
+          name: sess.name,
+          role: sess.role,
+          identifier: sess.identifier || '-',
+          classRoom: sess.classRoom,
+          positionOrSubject: sess.positionOrSubject || (sess.role === 'admin' ? 'Administrator Sistem' : sess.role === 'guru' ? 'Guru' : 'Siswa CBT'),
+          photoUrl: sess.photoUrl,
+          isLoggedIn: true,
+          isOnline: true,
+          isIdle: false,
+          lastLoginTime: sess.loginTime,
+          lastActiveTimestamp: sess.lastPing,
+          relativeTime: 'Online (Server)',
+          currentActivity: sess.currentActivity || 'Aktif di Sistem CBT',
+          activityDetails: sess.activityDetails || 'Akun Terdeteksi Server',
+          examCount: 0,
+          gameCount: 0,
+          isCurrentSessionUser: currentUser?.name?.toLowerCase() === sess.name.toLowerCase(),
+          device: sess.device,
+          isMultiDevice: sess.isMultiDeviceLogin,
+        });
+      }
+    });
+
     // Add current user if Admin and not in list
     if (currentUser && currentUser.role === 'admin') {
       const adminName = (!currentUser.name || currentUser.name.trim().toLowerCase() === 'administrator')
@@ -577,7 +664,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
     // Filter out any admin named "Administrator" permanently
     return list.filter((u) => !(u.role === 'admin' && u.name.trim().toLowerCase() === 'administrator'));
-  }, [teachers, students, loginLogs, results, gameLogs, currentUser, nowMs]);
+  }, [teachers, students, loginLogs, results, gameLogs, currentUser, nowMs, presenceSummary]);
 
   // Aggregate Metrics for User Logins
   const totalAccounts = userAccountList.length;
@@ -727,6 +814,70 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
           );
         })}
+      </div>
+
+      {/* SECTION: RADAR LIVE SERVER - DETEKSI AKUN GURU & SISWA ONLINE */}
+      <div className="bg-gradient-to-r from-emerald-950/40 via-slate-900 to-indigo-950/40 rounded-2xl border border-emerald-500/30 p-4 sm:p-5 shadow-xl relative overflow-hidden">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-start sm:items-center gap-3">
+            <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 flex items-center justify-center shrink-0 shadow-lg shadow-emerald-500/10">
+              <Radio className="w-6 h-6 animate-pulse" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="text-base sm:text-lg font-black text-slate-100 tracking-tight">
+                  Radar Server CBT: Deteksi Akun Guru & Siswa Sedang Online
+                </h3>
+                <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[10px] font-black uppercase tracking-wider flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+                  Terdeteksi Langsung
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Server mendeteksi secara otomatis bila guru atau siswa sedang online dengan akun yang berbeda pada perangkat dan browser apapun.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 sm:self-center shrink-0">
+            <button
+              onClick={onOpenPresenceModal}
+              className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs shadow-lg shadow-emerald-500/20 flex items-center gap-2 transition-all cursor-pointer hover:scale-102"
+            >
+              <Radio className="w-4 h-4" />
+              <span>Buka Pemantauan Online Server ({presenceSummary?.totalOnline ?? onlineAccountsCount} Akun)</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Active Accounts Pills Preview */}
+        {presenceSummary?.sessions && presenceSummary.sessions.length > 0 && (
+          <div className="mt-3.5 pt-3 border-t border-slate-800/80 flex items-center gap-2 overflow-x-auto pb-1 custom-scrollbar">
+            <span className="text-[11px] font-bold text-slate-400 shrink-0 flex items-center gap-1">
+              <Activity className="w-3.5 h-3.5 text-emerald-400" />
+              Akun Berbeda Aktif:
+            </span>
+            {presenceSummary.sessions.map((sess) => (
+              <div
+                key={sess.sessionId}
+                onClick={onOpenPresenceModal}
+                className={`shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border transition-all cursor-pointer ${
+                  sess.role === 'guru'
+                    ? 'bg-blue-500/15 text-blue-300 border-blue-500/30 hover:bg-blue-500/25'
+                    : sess.role === 'siswa'
+                    ? 'bg-purple-500/15 text-purple-300 border-purple-500/30 hover:bg-purple-500/25'
+                    : 'bg-amber-500/15 text-amber-300 border-amber-500/30 hover:bg-amber-500/25'
+                }`}
+                title={`${sess.name} (${sess.role}) - ${sess.currentActivity}`}
+              >
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                <span>{sess.name}</span>
+                {sess.classRoom && <span className="opacity-70 font-normal">({sess.classRoom})</span>}
+                {sess.role === 'guru' && <span className="opacity-70 font-normal">[Guru]</span>}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* SECTION: MONITORING STATUS LOGIN PENGGUNA (GURU & SISWA) */}

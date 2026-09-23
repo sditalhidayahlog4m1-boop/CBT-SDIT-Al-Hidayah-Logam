@@ -1347,6 +1347,206 @@ PETUNJUK FORMAT SPESIFIK BERDASARKAN TIPE GAME UNTUK MAPEL UMUM:
     }
   });
 
+  // Live In-Memory Presence Tracker (detecting online teachers, students, admins, and different accounts)
+  interface OnlineSession {
+    sessionId: string;
+    userId: string;
+    name: string;
+    role: 'admin' | 'guru' | 'siswa' | 'umum';
+    identifier: string;
+    classRoom?: string;
+    positionOrSubject?: string;
+    device?: string;
+    browser?: string;
+    ip?: string;
+    currentActivity: string;
+    activityDetails?: string;
+    loginTime: string;
+    lastPing: number;
+    photoUrl?: string;
+  }
+
+  const activePresenceSessions = new Map<string, OnlineSession>();
+  const recentOnlineAccounts = new Map<string, { name: string; role: string; lastSeen: number }>();
+  const kickedSessions = new Set<string>();
+
+  function purgeStaleSessions() {
+    const now = Date.now();
+    for (const [sessionId, sess] of activePresenceSessions.entries()) {
+      if (now - sess.lastPing > 40000) {
+        console.log(`[Presence Server] Session expired/offline: ${sess.role.toUpperCase()} "${sess.name}" (${sess.sessionId})`);
+        activePresenceSessions.delete(sessionId);
+      }
+    }
+  }
+
+  setInterval(purgeStaleSessions, 15000);
+
+  // Heartbeat endpoint called by clients every 10-15s
+  app.post("/api/presence/heartbeat", (req, res) => {
+    try {
+      const {
+        sessionId,
+        userId,
+        name,
+        role,
+        identifier,
+        classRoom,
+        positionOrSubject,
+        device,
+        browser,
+        currentActivity,
+        activityDetails,
+        loginTime,
+        photoUrl
+      } = req.body || {};
+
+      if (!sessionId || !name || !role) {
+        return res.status(400).json({ success: false, message: "Parameter presence tidak lengkap" });
+      }
+
+      if (kickedSessions.has(sessionId)) {
+        return res.json({
+          success: false,
+          kicked: true,
+          message: "Sesi akun Anda telah diputus oleh Administrator Server"
+        });
+      }
+
+      const clientIp = (req.headers["x-forwarded-for"] || req.socket.remoteAddress || "").toString().split(",")[0].trim();
+      const now = Date.now();
+      const isNewSession = !activePresenceSessions.has(sessionId);
+
+      let isDifferentAccount = false;
+      const accountKey = `${role}:${(identifier || name).toLowerCase()}`;
+      const existingAccount = recentOnlineAccounts.get(accountKey);
+      if (!existingAccount || (now - existingAccount.lastSeen > 60000)) {
+        isDifferentAccount = true;
+      }
+      recentOnlineAccounts.set(accountKey, { name, role, lastSeen: now });
+
+      const sessionObj: OnlineSession = {
+        sessionId,
+        userId: userId || identifier || name,
+        name,
+        role: role as any,
+        identifier: identifier || "-",
+        classRoom,
+        positionOrSubject,
+        device: device || "Web Browser",
+        browser,
+        ip: clientIp,
+        currentActivity: currentActivity || "Aktif di Sistem",
+        activityDetails: activityDetails || "",
+        loginTime: loginTime || new Date().toLocaleTimeString("id-ID"),
+        lastPing: now,
+        photoUrl
+      };
+
+      activePresenceSessions.set(sessionId, sessionObj);
+
+      if (isNewSession) {
+        console.log(`[Presence Server] ${role.toUpperCase()} ONLINE TERDETEKSI: "${name}" (${classRoom || positionOrSubject || identifier || "Akun Berbeda"}) IP: ${clientIp}`);
+      }
+
+      purgeStaleSessions();
+
+      const allSessions = Array.from(activePresenceSessions.values());
+      const guruCount = allSessions.filter(s => s.role === 'guru').length;
+      const siswaCount = allSessions.filter(s => s.role === 'siswa').length;
+      const adminCount = allSessions.filter(s => s.role === 'admin').length;
+      const uniqueAccounts = new Set(allSessions.map(s => `${s.role}:${(s.identifier || s.name).toLowerCase()}`)).size;
+
+      return res.json({
+        success: true,
+        isNewSession,
+        isDifferentAccount,
+        totalOnline: allSessions.length,
+        uniqueAccountsCount: uniqueAccounts,
+        guruCount,
+        siswaCount,
+        adminCount
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, message: err?.message || "Internal server error" });
+    }
+  });
+
+  // Get all currently active online accounts (Guru, Siswa, Admin) with multi-device detection
+  app.get("/api/presence/active", (_req, res) => {
+    purgeStaleSessions();
+    const sessions = Array.from(activePresenceSessions.values());
+
+    const accountCounts = new Map<string, number>();
+    for (const s of sessions) {
+      const key = `${s.role}:${(s.identifier || s.name).toLowerCase()}`;
+      accountCounts.set(key, (accountCounts.get(key) || 0) + 1);
+    }
+
+    const formattedSessions = sessions.map(s => {
+      const key = `${s.role}:${(s.identifier || s.name).toLowerCase()}`;
+      const duplicateCount = accountCounts.get(key) || 1;
+      return {
+        ...s,
+        isMultiDeviceLogin: duplicateCount > 1,
+        duplicateCount
+      };
+    });
+
+    const guruSessions = formattedSessions.filter(s => s.role === 'guru');
+    const siswaSessions = formattedSessions.filter(s => s.role === 'siswa');
+    const adminSessions = formattedSessions.filter(s => s.role === 'admin');
+    const uniqueAccountsCount = accountCounts.size;
+
+    return res.json({
+      success: true,
+      totalOnline: formattedSessions.length,
+      uniqueAccountsCount,
+      guruCount: guruSessions.length,
+      siswaCount: siswaSessions.length,
+      adminCount: adminSessions.length,
+      sessions: formattedSessions,
+      guruSessions,
+      siswaSessions,
+      adminSessions,
+      serverTime: Date.now()
+    });
+  });
+
+  // Explicit logout notification from client
+  app.post("/api/presence/logout", (req, res) => {
+    try {
+      const { sessionId } = req.body || {};
+      if (sessionId && activePresenceSessions.has(sessionId)) {
+        const sess = activePresenceSessions.get(sessionId);
+        console.log(`[Presence Server] User Logged Out: ${sess?.role.toUpperCase()} "${sess?.name}" (${sessionId})`);
+        activePresenceSessions.delete(sessionId);
+      }
+      return res.json({ success: true });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, message: err?.message || "Internal server error" });
+    }
+  });
+
+  // Admin remote force logout / kick
+  app.post("/api/presence/kick", (req, res) => {
+    try {
+      const { sessionId } = req.body || {};
+      if (!sessionId) {
+        return res.status(400).json({ success: false, message: "Session ID wajib disertakan" });
+      }
+      if (activePresenceSessions.has(sessionId)) {
+        const sess = activePresenceSessions.get(sessionId);
+        console.log(`[Presence Server] Sesi DIPUTUS OLEH ADMIN: ${sess?.role.toUpperCase()} "${sess?.name}" (${sessionId})`);
+        activePresenceSessions.delete(sessionId);
+        kickedSessions.add(sessionId);
+      }
+      return res.json({ success: true, message: "Sesi berhasil diputus oleh Administrator" });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, message: err?.message || "Internal server error" });
+    }
+  });
+
   app.get("/api/credentials", (_req, res) => {
     res.json({
       success: true,

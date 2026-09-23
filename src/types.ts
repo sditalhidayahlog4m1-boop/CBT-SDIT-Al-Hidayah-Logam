@@ -154,6 +154,39 @@ export interface UserLoginLog {
   photoUrl?: string;
 }
 
+export interface ActiveOnlineSession {
+  sessionId: string;
+  userId: string;
+  name: string;
+  role: 'admin' | 'guru' | 'siswa' | 'umum';
+  identifier?: string;
+  classRoom?: string;
+  positionOrSubject?: string;
+  device?: string;
+  browser?: string;
+  ip?: string;
+  currentActivity: string;
+  activityDetails?: string;
+  loginTime: string;
+  lastPing: number;
+  photoUrl?: string;
+  isMultiDeviceLogin?: boolean;
+  duplicateCount?: number;
+}
+
+export interface PresenceSummary {
+  totalOnline: number;
+  uniqueAccountsCount: number;
+  guruCount: number;
+  siswaCount: number;
+  adminCount: number;
+  sessions: ActiveOnlineSession[];
+  guruSessions?: ActiveOnlineSession[];
+  siswaSessions?: ActiveOnlineSession[];
+  adminSessions?: ActiveOnlineSession[];
+  serverTime?: number;
+}
+
 export interface DailyGradeRecord {
   id: string;
   studentId: string;

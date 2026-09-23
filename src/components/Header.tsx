@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Clock, UserCheck, ShieldCheck, Wifi, WifiOff, Menu, X, LogIn, GraduationCap, Users, LogOut } from 'lucide-react';
-import { ActiveTab, AuthUser } from '../types';
+import { Clock, UserCheck, ShieldCheck, Wifi, WifiOff, Menu, X, LogIn, GraduationCap, Users, LogOut, Radio } from 'lucide-react';
+import { ActiveTab, AuthUser, PresenceSummary } from '../types';
 import { SchoolProfile } from '../utils/storage';
 
 interface HeaderProps {
@@ -12,6 +12,8 @@ interface HeaderProps {
   onOpenLoginModal: () => void;
   onLogout?: () => void;
   schoolProfile?: SchoolProfile;
+  presenceSummary?: PresenceSummary | null;
+  onOpenPresenceModal?: () => void;
 }
 
 const TAB_TITLES: Record<ActiveTab, { title: string; subtitle: string }> = {
@@ -98,6 +100,8 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenLoginModal,
   onLogout,
   schoolProfile,
+  presenceSummary,
+  onOpenPresenceModal,
 }) => {
   const [isOnline, setIsOnline] = useState<boolean>(
     typeof navigator !== 'undefined' ? navigator.onLine : true
@@ -219,6 +223,24 @@ export const Header: React.FC<HeaderProps> = ({
             </>
           )}
         </div>
+
+        {/* Live Server Presence Badge */}
+        {presenceSummary !== undefined && (
+          <button
+            onClick={onOpenPresenceModal}
+            className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1 rounded-xl text-[10px] sm:text-xs font-bold border transition-all cursor-pointer bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border-emerald-500/30 shadow-xs group"
+            title="Klik untuk melihat deteksi guru & siswa yang sedang online di server"
+          >
+            <Radio className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-emerald-400 animate-pulse shrink-0" />
+            <span className="flex items-center gap-1">
+              <span className="font-extrabold text-white">{presenceSummary?.totalOnline ?? 0}</span>
+              <span className="hidden sm:inline">Online</span>
+              <span className="hidden md:inline text-emerald-400/80 font-normal">
+                ({presenceSummary?.guruCount ?? 0} Guru, {presenceSummary?.siswaCount ?? 0} Siswa)
+              </span>
+            </span>
+          </button>
+        )}
 
         {/* Realtime Clock & Date Widget */}
         <div className="flex items-center gap-1.5 px-2 sm:px-3 py-1 bg-slate-900/90 border border-slate-700/80 rounded-xl text-[10px] sm:text-xs shadow-inner">

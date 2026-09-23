@@ -67,6 +67,22 @@ import { GameHistoryView } from './components/GameHistoryView';
 import { HakAksesView } from './components/HakAksesView';
 import { BackupUploadDataView } from './components/BackupUploadDataView';
 import { ResetDataView } from './components/ResetDataView';
+import { OnlinePresenceModal } from './components/OnlinePresenceModal';
+import { PresenceToastAlert } from './components/PresenceToastAlert';
+
+import {
+  ActiveOnlineSession,
+  PresenceSummary,
+} from './types';
+import {
+  startPresenceService,
+  stopPresenceService,
+  subscribeToPresence,
+  subscribeToDifferentAccountDetected,
+  registerKickedHandler,
+  sendPresenceLogout,
+  fetchActivePresence,
+} from './utils/presenceClient';
 
 import {
   fetchAppDataFromFirestore,
@@ -127,6 +143,11 @@ export default function App() {
   const [dailyGrades, setDailyGrades] = useState<DailyGradeRecord[]>(getStoredDailyGrades);
   const [gameData, setGameData] = useState<Record<string, any>>(getStoredGameData);
 
+  // Live Server Presence State (Real-time detection of online teachers, students, & distinct accounts)
+  const [presenceSummary, setPresenceSummary] = useState<PresenceSummary | null>(null);
+  const [isPresenceModalOpen, setIsPresenceModalOpen] = useState(false);
+  const [detectedAccountAlert, setDetectedAccountAlert] = useState<ActiveOnlineSession | null>(null);
+
   // Active Exam Focus Mode state
   const [activeExam, setActiveExam] = useState<{
     studentName: string;
@@ -163,6 +184,8 @@ export default function App() {
   rolePermissionsRef.current = rolePermissions;
   const gameDataRef = useRef(gameData);
   gameDataRef.current = gameData;
+  const currentUserRef = useRef(currentUser);
+  currentUserRef.current = currentUser;
 
   const applyRemoteData = (data: AppData, isLocalWrite: boolean = false) => {
     if (isLocalWrite) return;
@@ -519,6 +542,41 @@ export default function App() {
       return () => clearInterval(heartbeatTimer);
     }, [currentUser, updateUserActivity]);
 
+  // Live Server Presence Service (Heartbeat, Polling, Remote Kick, & Multi-Device/Different Account Detection)
+  useEffect(() => {
+    // 1. Remote Kick Listener
+    registerKickedHandler(() => {
+      alert('Sesi login Anda telah diputuskan oleh Administrator CBT.');
+      handleLogout();
+    });
+
+    // 2. Presence Snapshot Subscription
+    const unsubPresence = subscribeToPresence((summary) => {
+      setPresenceSummary(summary);
+    });
+
+    // 3. Different Account Detected Listener
+    const unsubDiff = subscribeToDifferentAccountDetected((newSess) => {
+      const curr = currentUserRef.current;
+      const isSelf = curr && curr.name.trim().toLowerCase() === newSess.name.trim().toLowerCase();
+      if (!isSelf && (curr?.role === 'admin' || curr?.role === 'guru')) {
+        setDetectedAccountAlert(newSess);
+      }
+    });
+
+    // 4. Start heartbeat and polling service
+    startPresenceService(
+      () => currentUserRef.current,
+      () => currentUserActivityRef.current
+    );
+
+    return () => {
+      unsubPresence();
+      unsubDiff();
+      stopPresenceService();
+    };
+  }, []);
+
   // Synchronize Favicon, Web App Icons, Meta Tags, and Document Title with School Profile & Custom Logo
   useEffect(() => {
     let name = schoolProfile?.name?.trim() || 'SDIT Al Hidayah Logam';
@@ -745,7 +803,10 @@ export default function App() {
   };
 
   const handleLogout = () => {
-    // 0. Update status to offline in Firestore before resetting local state
+    // 0. Notify presence server that this session logged out
+    sendPresenceLogout();
+
+    // 0.1 Update status to offline in Firestore before resetting local state
     if (currentUser) {
       const now = new Date();
       const formattedTime = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
@@ -1411,6 +1472,8 @@ export default function App() {
           onOpenLoginModal={handleOpenLoginModal}
           onLogout={handleLogout}
           schoolProfile={schoolProfile}
+          presenceSummary={presenceSummary}
+          onOpenPresenceModal={() => setIsPresenceModalOpen(true)}
         />
 
         {/* Content Area */}
@@ -1427,6 +1490,8 @@ export default function App() {
               setActiveTab={handleNavigateTab}
               currentUser={currentUser}
               onOpenLoginModal={handleOpenLoginModal}
+              presenceSummary={presenceSummary}
+              onOpenPresenceModal={() => setIsPresenceModalOpen(true)}
             />
           )}
 
@@ -1608,6 +1673,22 @@ export default function App() {
           onLogin={handleLogin}
           onLogout={handleLogout}
           schoolProfile={schoolProfile}
+        />
+
+        {/* Live Server Presence Modal */}
+        <OnlinePresenceModal
+          isOpen={isPresenceModalOpen}
+          onClose={() => setIsPresenceModalOpen(false)}
+          summary={presenceSummary}
+          onRefresh={fetchActivePresence}
+          currentUser={currentUser}
+        />
+
+        {/* Real-time Toast Alert when a different account is detected online */}
+        <PresenceToastAlert
+          detectedSession={detectedAccountAlert}
+          onClear={() => setDetectedAccountAlert(null)}
+          onOpenModal={() => setIsPresenceModalOpen(true)}
         />
       </div>
     </div>
